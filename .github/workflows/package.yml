@@ -1,0 +1,77 @@
+name: Package installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  linux:
+    # Cible principale (cf. CLAUDE.md § Positionnement) — x86_64 uniquement ici ;
+    # arm64 (Raspberry Pi) demanderait un runner arm64 dédié, pas encore mis en place.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - run: mvn -B clean package
+
+      - run: ./packaging/jpackage-linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: printerbridge-linux-deb
+          path: target/dist/*.deb
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - run: mvn -B clean package
+
+      # WiX Toolset est préinstallé sur ce runner mais pas sur le PATH par défaut
+      # (vérifié : jpackage --type msi échoue sinon avec "Can not find WiX tools").
+      - name: Add WiX Toolset to PATH
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH "$env:WIX\bin"
+
+      - shell: pwsh
+        run: ./packaging/jpackage-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: printerbridge-windows-msi
+          path: target/dist/*.msi
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - run: mvn -B clean package
+
+      - run: ./packaging/jpackage-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: printerbridge-macos-pkg
+          path: target/dist/*.pkg
