@@ -19,6 +19,7 @@ public final class ApiServer {
     private static final String BIND_HOST = "127.0.0.1";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Map<WsContext, PrintControlMessage> PENDING_CONTROL = new ConcurrentHashMap<>();
+    private static final PrinterRegistry REGISTRY = new PrinterRegistry();
 
     private ApiServer() {
     }
@@ -27,17 +28,17 @@ public final class ApiServer {
         return Javalin.create(config -> {
             config.jetty.host = BIND_HOST;
             config.jetty.port = port;
-            config.routes.get("/printers", ctx -> ctx.json(PrinterRegistry.discoverAll()));
+            config.routes.get("/printers", ctx -> ctx.json(REGISTRY.discoverAll()));
             config.routes.get("/printers/{id}/status", ctx -> {
                 String id = ctx.pathParam("id");
-                ctx.json(PrinterRegistry.findStatus(id)
+                ctx.json(REGISTRY.findStatus(id)
                         .orElseThrow(() -> new NotFoundResponse("Unknown printer id: " + id)));
             });
             config.routes.ws("/printers/{id}/print", ws -> {
                 ws.onMessage(ApiServer::onControlMessage);
                 ws.onBinaryMessage(ApiServer::onPayload);
-                ws.onClose(ctx -> PENDING_CONTROL.remove(ctx));
-                ws.onError(ctx -> PENDING_CONTROL.remove(ctx));
+                ws.onClose(PENDING_CONTROL::remove);
+                ws.onError(PENDING_CONTROL::remove);
             });
         }).start();
     }

@@ -1,40 +1,37 @@
 package org.printerbridge.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.Printer;
+import org.printerbridge.printer.PrinterStatus;
+import org.printerbridge.printer.PrinterType;
 
 class PrinterRegistryTest {
 
-    @Test
-    void aggregatesBluetoothAndNetworkDiscovery() {
-        long expectedCount = Stream.concat(
-                        new BluetoothPrinterDiscovery().discover().stream(),
-                        new NetworkPrinterDiscovery().discover().stream())
-                .count();
+    private final Printer bluetoothPrinter =
+            new Printer("bt-1", "Fake BT", PrinterType.BLUETOOTH_THERMAL, PrinterStatus.UNKNOWN);
+    private final Printer networkPrinter =
+            new Printer("net-1", "Fake Network", PrinterType.NETWORK, PrinterStatus.ONLINE);
 
-        assertEquals(expectedCount, PrinterRegistry.discoverAll().size());
+    private final PrinterRegistry registry = new PrinterRegistry(List.of(
+            new FakePrinterDiscovery(List.of(bluetoothPrinter)),
+            new FakePrinterDiscovery(List.of(networkPrinter))));
+
+    @Test
+    void discoverAllAggregatesEveryDiscoveryServiceInOrder() {
+        assertEquals(List.of(bluetoothPrinter, networkPrinter), registry.discoverAll());
     }
 
     @Test
-    void findStatusReturnsEmptyForUnknownId() {
-        assertEquals(Optional.empty(), PrinterRegistry.findStatus("unknown"));
+    void findStatusReturnsTheFirstMatchAcrossServices() {
+        assertEquals(Optional.of(networkPrinter), registry.findStatus("net-1"));
     }
 
     @Test
-    void findStatusMatchesADiscoveredPrinterWhenOneExists() {
-        List<Printer> printers = PrinterRegistry.discoverAll();
-        if (printers.isEmpty()) {
-            return;
-        }
-        Printer expected = printers.get(0);
-
-        assertTrue(PrinterRegistry.findStatus(expected.id()).isPresent());
-        assertEquals(expected.id(), PrinterRegistry.findStatus(expected.id()).get().id());
+    void findStatusReturnsEmptyWhenNoServiceKnowsTheId() {
+        assertEquals(Optional.empty(), registry.findStatus("unknown"));
     }
 }

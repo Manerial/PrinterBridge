@@ -28,6 +28,7 @@ import org.printerbridge.service.PrinterRegistry;
 class ApiServerTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
+    private final PrinterRegistry registry = new PrinterRegistry();
 
     private Javalin app;
 
@@ -54,7 +55,7 @@ class ApiServerTest {
         assertEquals(200, response.statusCode());
         List<Printer> actual = mapper.readValue(response.body(), new TypeReference<List<Printer>>() {
         });
-        assertEquals(PrinterRegistry.discoverAll(), actual);
+        assertEquals(registry.discoverAll(), actual);
     }
 
     @Test
@@ -72,7 +73,7 @@ class ApiServerTest {
 
     @Test
     void statusReturns200ForAKnownPrinter() throws IOException, InterruptedException {
-        List<Printer> printers = PrinterRegistry.discoverAll();
+        List<Printer> printers = registry.discoverAll();
         if (printers.isEmpty()) {
             return;
         }
@@ -102,7 +103,7 @@ class ApiServerTest {
 
     @Test
     void printRejectsMismatchedContentTypeForNetworkPrinter() throws Exception {
-        Printer network = PrinterRegistry.discoverAll().stream()
+        Printer network = registry.discoverAll().stream()
                 .filter(printer -> printer.type() == PrinterType.NETWORK)
                 .findFirst()
                 .orElse(null);

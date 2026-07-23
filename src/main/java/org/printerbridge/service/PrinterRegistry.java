@@ -6,21 +6,27 @@ import org.printerbridge.printer.Printer;
 
 public final class PrinterRegistry {
 
-    private static final List<PrinterDiscovery> DISCOVERY_SERVICES = List.of(
-            new BluetoothPrinterDiscovery(),
-            new NetworkPrinterDiscovery());
+    private final List<PrinterDiscovery> discoveryServices;
 
-    private PrinterRegistry() {
+    public PrinterRegistry() {
+        this(List.of(
+                new BluetoothPrinterDiscovery(),
+                new NetworkPrinterDiscovery())
+        );
     }
 
-    public static List<Printer> discoverAll() {
-        return DISCOVERY_SERVICES.stream()
+    public PrinterRegistry(List<PrinterDiscovery> discoveryServices) {
+        this.discoveryServices = discoveryServices;
+    }
+
+    public List<Printer> discoverAll() {
+        return discoveryServices.stream()
                 .flatMap(service -> service.discover().stream())
                 .toList();
     }
 
-    public static Optional<Printer> findStatus(String id) {
-        for (PrinterDiscovery service : DISCOVERY_SERVICES) {
+    public Optional<Printer> findStatus(String id) {
+        for (PrinterDiscovery service : discoveryServices) {
             Optional<Printer> found = service.findById(id);
             if (found.isPresent()) {
                 return found;
