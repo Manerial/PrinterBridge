@@ -29,6 +29,12 @@ public final class NetworkPrinterDiscovery {
                 .findFirst();
     }
 
+    static Optional<PrintService> findService(String id) {
+        return Arrays.stream(PrintServiceLookup.lookupPrintServices(null, null))
+                .filter(service -> PrinterId.derive(service.getName()).equals(id))
+                .findFirst();
+    }
+
     private static Printer toPrinter(PrintService service) {
         String name = service.getName();
         String id = PrinterId.derive(name);

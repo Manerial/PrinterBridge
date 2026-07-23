@@ -22,11 +22,15 @@ public final class BluetoothPrinterDiscovery {
     }
 
     public static Optional<Printer> findById(String id) {
-        return Arrays.stream(SerialPort.getCommPorts())
-                .filter(port -> PrinterId.derive(port.getSystemPortName()).equals(id))
-                .findFirst()
+        return findPort(id)
                 .map(port -> new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL,
                         testConnectivity(port)));
+    }
+
+    static Optional<SerialPort> findPort(String id) {
+        return Arrays.stream(SerialPort.getCommPorts())
+                .filter(port -> PrinterId.derive(port.getSystemPortName()).equals(id))
+                .findFirst();
     }
 
     private static Printer toPrinter(SerialPort port) {
