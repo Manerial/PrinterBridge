@@ -1,9 +1,8 @@
-package org.printerbridge.printer;
+package org.printerbridge.service;
 
 import java.util.List;
 import java.util.stream.Stream;
-import org.printerbridge.transport.bluetooth.BluetoothPrinterDiscovery;
-import org.printerbridge.transport.network.NetworkPrinterDiscovery;
+import org.printerbridge.printer.Printer;
 
 public final class PrinterRegistry {
 

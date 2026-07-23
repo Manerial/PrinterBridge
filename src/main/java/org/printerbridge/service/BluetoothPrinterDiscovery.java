@@ -1,4 +1,4 @@
-package org.printerbridge.transport.bluetooth;
+package org.printerbridge.service;
 
 import com.fazecast.jSerialComm.SerialPort;
 import java.util.Arrays;

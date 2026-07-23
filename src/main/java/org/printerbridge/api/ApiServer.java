@@ -1,7 +1,7 @@
 package org.printerbridge.api;
 
 import io.javalin.Javalin;
-import org.printerbridge.printer.PrinterRegistry;
+import org.printerbridge.service.PrinterRegistry;
 
 public final class ApiServer {
 

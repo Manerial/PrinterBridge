@@ -1,4 +1,4 @@
-package org.printerbridge.transport.bluetooth;
+package org.printerbridge.service;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,16 +10,16 @@ import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterType;
 
-class BluetoothPrinterDiscoveryTest {
+class NetworkPrinterDiscoveryTest {
 
     @Test
-    void discoversWhateverSerialPortsAreAvailableWithoutThrowing() {
-        List<Printer> printers = assertDoesNotThrow(BluetoothPrinterDiscovery::discover);
+    void discoversWhateverIsRegisteredAtOsLevelWithoutThrowing() {
+        List<Printer> printers = assertDoesNotThrow(NetworkPrinterDiscovery::discover);
 
         for (Printer printer : printers) {
             assertNotNull(printer.id());
             assertTrue(printer.id().matches("[0-9a-f]{16}"));
-            assertEquals(PrinterType.BLUETOOTH_THERMAL, printer.type());
+            assertEquals(PrinterType.NETWORK, printer.type());
         }
     }
 }

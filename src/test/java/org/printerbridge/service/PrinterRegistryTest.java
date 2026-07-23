@@ -1,11 +1,9 @@
-package org.printerbridge.printer;
+package org.printerbridge.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.printerbridge.transport.bluetooth.BluetoothPrinterDiscovery;
-import org.printerbridge.transport.network.NetworkPrinterDiscovery;
 
 class PrinterRegistryTest {
 

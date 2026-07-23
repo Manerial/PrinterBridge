@@ -15,7 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.Printer;
-import org.printerbridge.printer.PrinterRegistry;
+import org.printerbridge.service.PrinterRegistry;
 
 class ApiServerTest {
 

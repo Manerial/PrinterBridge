@@ -1,4 +1,4 @@
-package org.printerbridge.transport.network;
+package org.printerbridge.service;
 
 import java.util.Arrays;
 import java.util.List;
