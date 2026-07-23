@@ -11,19 +11,18 @@ import org.printerbridge.printer.PrinterId;
 import org.printerbridge.printer.PrinterStatus;
 import org.printerbridge.printer.PrinterType;
 
-public final class NetworkPrinterDiscovery {
+public final class NetworkPrinterDiscovery implements PrinterDiscovery {
 
-    private NetworkPrinterDiscovery() {
-    }
-
-    public static List<Printer> discover() {
+    @Override
+    public List<Printer> discover() {
         PrintService[] services = PrintServiceLookup.lookupPrintServices(null, null);
         return Arrays.stream(services)
                 .map(NetworkPrinterDiscovery::toPrinter)
                 .toList();
     }
 
-    public static Optional<Printer> findById(String id) {
+    @Override
+    public Optional<Printer> findById(String id) {
         return discover().stream()
                 .filter(printer -> printer.id().equals(id))
                 .findFirst();

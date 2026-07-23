@@ -13,9 +13,11 @@ import org.printerbridge.printer.PrinterType;
 
 class NetworkPrinterDiscoveryTest {
 
+    private final NetworkPrinterDiscovery discovery = new NetworkPrinterDiscovery();
+
     @Test
     void discoversWhateverIsRegisteredAtOsLevelWithoutThrowing() {
-        List<Printer> printers = assertDoesNotThrow(NetworkPrinterDiscovery::discover);
+        List<Printer> printers = assertDoesNotThrow(discovery::discover);
 
         for (Printer printer : printers) {
             assertNotNull(printer.id());
@@ -26,17 +28,17 @@ class NetworkPrinterDiscoveryTest {
 
     @Test
     void findByIdReturnsEmptyForUnknownId() {
-        assertEquals(Optional.empty(), NetworkPrinterDiscovery.findById("unknown"));
+        assertEquals(Optional.empty(), discovery.findById("unknown"));
     }
 
     @Test
     void findByIdMatchesDiscoveredPrinterWhenOneExists() {
-        List<Printer> printers = NetworkPrinterDiscovery.discover();
+        List<Printer> printers = discovery.discover();
         if (printers.isEmpty()) {
             return;
         }
         Printer expected = printers.get(0);
 
-        assertEquals(Optional.of(expected), NetworkPrinterDiscovery.findById(expected.id()));
+        assertEquals(Optional.of(expected), discovery.findById(expected.id()));
     }
 }

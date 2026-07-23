@@ -9,19 +9,18 @@ import org.printerbridge.printer.PrinterId;
 import org.printerbridge.printer.PrinterStatus;
 import org.printerbridge.printer.PrinterType;
 
-public final class BluetoothPrinterDiscovery {
+public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
 
-    private BluetoothPrinterDiscovery() {
-    }
-
-    public static List<Printer> discover() {
+    @Override
+    public List<Printer> discover() {
         SerialPort[] ports = SerialPort.getCommPorts();
         return Arrays.stream(ports)
                 .map(BluetoothPrinterDiscovery::toPrinter)
                 .toList();
     }
 
-    public static Optional<Printer> findById(String id) {
+    @Override
+    public Optional<Printer> findById(String id) {
         return findPort(id)
                 .map(port -> new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL,
                         testConnectivity(port)));

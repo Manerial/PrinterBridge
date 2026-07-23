@@ -13,9 +13,11 @@ import org.printerbridge.printer.PrinterType;
 
 class BluetoothPrinterDiscoveryTest {
 
+    private final BluetoothPrinterDiscovery discovery = new BluetoothPrinterDiscovery();
+
     @Test
     void discoversWhateverSerialPortsAreAvailableWithoutThrowing() {
-        List<Printer> printers = assertDoesNotThrow(BluetoothPrinterDiscovery::discover);
+        List<Printer> printers = assertDoesNotThrow(discovery::discover);
 
         for (Printer printer : printers) {
             assertNotNull(printer.id());
@@ -26,6 +28,6 @@ class BluetoothPrinterDiscoveryTest {
 
     @Test
     void findByIdReturnsEmptyForUnknownId() {
-        assertEquals(Optional.empty(), BluetoothPrinterDiscovery.findById("unknown"));
+        assertEquals(Optional.empty(), discovery.findById("unknown"));
     }
 }

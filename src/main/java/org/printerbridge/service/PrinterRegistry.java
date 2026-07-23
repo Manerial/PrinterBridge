@@ -2,26 +2,30 @@ package org.printerbridge.service;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
 import org.printerbridge.printer.Printer;
 
 public final class PrinterRegistry {
+
+    private static final List<PrinterDiscovery> DISCOVERY_SERVICES = List.of(
+            new BluetoothPrinterDiscovery(),
+            new NetworkPrinterDiscovery());
 
     private PrinterRegistry() {
     }
 
     public static List<Printer> discoverAll() {
-        return Stream.concat(
-                        BluetoothPrinterDiscovery.discover().stream(),
-                        NetworkPrinterDiscovery.discover().stream())
+        return DISCOVERY_SERVICES.stream()
+                .flatMap(service -> service.discover().stream())
                 .toList();
     }
 
     public static Optional<Printer> findStatus(String id) {
-        Optional<Printer> bluetooth = BluetoothPrinterDiscovery.findById(id);
-        if (bluetooth.isPresent()) {
-            return bluetooth;
+        for (PrinterDiscovery service : DISCOVERY_SERVICES) {
+            Optional<Printer> found = service.findById(id);
+            if (found.isPresent()) {
+                return found;
+            }
         }
-        return NetworkPrinterDiscovery.findById(id);
+        return Optional.empty();
     }
 }

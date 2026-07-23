@@ -14,8 +14,8 @@ class PrinterRegistryTest {
     @Test
     void aggregatesBluetoothAndNetworkDiscovery() {
         long expectedCount = Stream.concat(
-                        BluetoothPrinterDiscovery.discover().stream(),
-                        NetworkPrinterDiscovery.discover().stream())
+                        new BluetoothPrinterDiscovery().discover().stream(),
+                        new NetworkPrinterDiscovery().discover().stream())
                 .count();
 
         assertEquals(expectedCount, PrinterRegistry.discoverAll().size());
