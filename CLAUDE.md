@@ -138,12 +138,17 @@ Cette conversation de conception a aussi produit un schéma visuel (artefact Cla
 - **Identifiants d'imprimante** — id déterministe dérivé de l'adresse physique (voir § Responsabilités par couche), pas de fichier d'état persisté, pas de nom choisi par l'admin côté PrinterBridge.
 - **Signature de code** — pas de certificat en v1 pilote ; avertissements SmartScreen/Gatekeeper assumés, à documenter pour l'admin (procédure "exécuter quand même").
 
+## Décisions prises (implémentation découverte réseau/A4 et Bluetooth)
+
+- **Spike jSerialComm confirmé** — l'API ne donne accès à aucune adresse MAC Bluetooth ni identifiant matériel stable pour un port SPP (seulement `getSerialNumber()`/VID/PID pour de l'USB, inapplicable au Bluetooth). L'id est donc dérivé de `getSystemPortName()` (ex. `COM7`). Limite connue : si l'OS réattribue un port COM différent au même appareil réappairé, l'id changera — accepté comme compromis, cohérent avec l'absence de fichier d'état à persister.
+- **`jSerialComm.getCommPorts()` n'a aucun moyen fiable de distinguer un port Bluetooth SPP d'un autre port série (USB, UART physique)** — la découverte Bluetooth actuelle liste donc tous les ports COM détectés comme candidats thermiques. À affiner une fois testé contre une vraie imprimante thermique appairée (aucun matériel Bluetooth disponible pour valider un filtre pour l'instant).
+- **Registre** (`PrinterRegistry`) — agrège `BluetoothPrinterDiscovery` et `NetworkPrinterDiscovery`, exposé tel quel par `GET /printers`.
+
 ## Points ouverts (à trancher avant/pendant la story)
 
-1. **Vérification technique early spike** — sous Windows, `jSerialComm` expose un Bluetooth SPP comme port COM virtuel ; à confirmer si l'adresse MAC est accessible pour dériver l'id, sinon utiliser le descripteur de port système (`getSystemPortName()`/`getDescriptivePortName()`) comme base du hash.
-2. **Paquetage multi-OS** — l'installeur `jpackage` doit être construit en CI par OS (runners Windows/Mac dédiés) ; reste à mettre en place (la signature de code, elle, est tranchée ci-dessus).
-3. **Compatibilité de contrat d'API entre les deux repos** — PluriBourse et PrinterBridge évoluent maintenant séparément ; proposition : versionnage dans l'URL (`/v1/printers`, etc.), à valider et instrumenter (tests de contrat) quand un premier changement cassant se présentera.
-4. **Découverte imprimante WiFi thermique** — toujours reportée. Contrairement au réseau/A4 (résolu via `javax.print`), une imprimante thermique WiFi utilise typiquement un protocole ESC/POS brut sur socket (pas le spouleur OS) — nécessiterait sa propre couche transport (proche de l'actuel Bluetooth mais en TCP) et le découplage contenu/transport côté PluriBourse déjà noté plus haut.
+1. **Paquetage multi-OS** — l'installeur `jpackage` doit être construit en CI par OS (runners Windows/Mac dédiés) ; reste à mettre en place (la signature de code, elle, est tranchée ci-dessus).
+2. **Compatibilité de contrat d'API entre les deux repos** — PluriBourse et PrinterBridge évoluent maintenant séparément ; proposition : versionnage dans l'URL (`/v1/printers`, etc.), à valider et instrumenter (tests de contrat) quand un premier changement cassant se présentera.
+3. **Découverte imprimante WiFi thermique** — toujours reportée. Contrairement au réseau/A4 (résolu via `javax.print`), une imprimante thermique WiFi utilise typiquement un protocole ESC/POS brut sur socket (pas le spouleur OS) — nécessiterait sa propre couche transport (proche de l'actuel Bluetooth mais en TCP) et le découplage contenu/transport côté PluriBourse déjà noté plus haut.
 
 ## Conventions proposées (à ajuster librement — projet neuf)
 
@@ -153,3 +158,4 @@ Reprises de PluriBourse par cohérence (même auteur), à confirmer :
 - Accolades obligatoires sur tous les blocs `if`/`else`/`for`/`while`, même sur une ligne.
 - Commentaires uniquement quand le *pourquoi* n'est pas évident depuis le code.
 - Tests orientés bout-en-bout plutôt qu'unitaires isolés quand c'est pertinent — s'inspirer du double de test déjà utilisé côté PluriBourse pour l'A4 (un `ServerSocket` local ouvert dans les tests plutôt qu'une vraie imprimante réseau) pour tester la couche transport sans matériel réel. Le chemin Bluetooth réel, lui, n'est testé par aucun automatisme côté PluriBourse (pas de matériel disponible en CI) — probablement la même limite ici.
+- Logique métier (découverte, agrégation...) regroupée dans un package `service` (`org.printerbridge.service`), à la manière Spring Boot — convention volontairement reprise même si Javalin ne l'impose pas, par préférence explicite de l'utilisateur. Les classes de modèle/domaine (`Printer`, `PrinterType`, `PrinterStatus`, `PrinterId`) restent dans `org.printerbridge.printer`.
