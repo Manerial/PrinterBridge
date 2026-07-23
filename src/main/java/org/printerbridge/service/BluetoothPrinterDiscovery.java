@@ -3,6 +3,7 @@ package org.printerbridge.service;
 import com.fazecast.jSerialComm.SerialPort;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterId;
 import org.printerbridge.printer.PrinterStatus;
@@ -20,8 +21,24 @@ public final class BluetoothPrinterDiscovery {
                 .toList();
     }
 
+    public static Optional<Printer> findById(String id) {
+        return Arrays.stream(SerialPort.getCommPorts())
+                .filter(port -> PrinterId.derive(port.getSystemPortName()).equals(id))
+                .findFirst()
+                .map(port -> new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL,
+                        testConnectivity(port)));
+    }
+
     private static Printer toPrinter(SerialPort port) {
         String id = PrinterId.derive(port.getSystemPortName());
         return new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL, PrinterStatus.UNKNOWN);
+    }
+
+    private static PrinterStatus testConnectivity(SerialPort port) {
+        if (port.openPort()) {
+            port.closePort();
+            return PrinterStatus.ONLINE;
+        }
+        return PrinterStatus.OFFLINE;
     }
 }

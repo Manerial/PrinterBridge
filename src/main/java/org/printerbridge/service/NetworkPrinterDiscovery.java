@@ -2,6 +2,7 @@ package org.printerbridge.service;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import javax.print.PrintService;
 import javax.print.PrintServiceLookup;
 import javax.print.attribute.standard.PrinterIsAcceptingJobs;
@@ -20,6 +21,12 @@ public final class NetworkPrinterDiscovery {
         return Arrays.stream(services)
                 .map(NetworkPrinterDiscovery::toPrinter)
                 .toList();
+    }
+
+    public static Optional<Printer> findById(String id) {
+        return discover().stream()
+                .filter(printer -> printer.id().equals(id))
+                .findFirst();
     }
 
     private static Printer toPrinter(PrintService service) {
