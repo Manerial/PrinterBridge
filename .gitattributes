@@ -1,0 +1,5 @@
+# Scripts destinés à tourner sous Linux/Mac : forcer LF, quelle que soit la config Git locale.
+# Un shebang terminé par \r (CRLF) casse l'exécution sur Linux ("bad interpreter").
+*.sh text eol=lf
+packaging/linux/resources/postinst text eol=lf
+packaging/linux/resources/postrm text eol=lf

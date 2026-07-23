@@ -1,0 +1,17 @@
+#!/bin/sh
+# Overrides jpackage's default postrm (see packaging/README.md).
+# Removes the systemd --user unit installed by postinst.
+#
+# NOTE (limite connue, non résolue) : ce script tourne en root pendant dpkg, il n'a pas
+# accès à la session --user de l'admin pour arrêter proprement une instance en cours
+# d'exécution. Si le service tourne au moment de la désinstallation, l'arrêter à la main
+# avant : `systemctl --user stop printerbridge`.
+set -e
+
+case "$1" in
+    remove|purge)
+        rm -f /usr/lib/systemd/user/printerbridge.service
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Overrides jpackage's default postinst (see packaging/README.md).
+# Installs a systemd --user unit for PrinterBridge, WITHOUT enabling or starting it:
+# the admin must start it explicitly (systemctl --user start printerbridge). Restart=on-failure
+# means a crash while it's running gets recovered automatically, without ever auto-starting at boot/login.
+set -e
+
+install -d /usr/lib/systemd/user
+cat > /usr/lib/systemd/user/printerbridge.service <<'UNIT'
+[Unit]
+Description=PrinterBridge - service local d'impression pour PluriBourse
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/opt/printerbridge/bin/PrinterBridge
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+
+exit 0
