@@ -1,5 +1,6 @@
 package org.printerbridge;
 
+import io.javalin.Javalin;
 import org.printerbridge.api.ApiServer;
 
 public final class Main {
@@ -10,6 +11,7 @@ public final class Main {
     }
 
     public static void main(String[] args) {
-        ApiServer.start(PORT);
+        Javalin app = ApiServer.start(PORT);
+        TrayIconSupport.install(PORT, app::stop);
     }
 }
