@@ -15,7 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.Printer;
-import org.printerbridge.transport.network.NetworkPrinterDiscovery;
+import org.printerbridge.printer.PrinterRegistry;
 
 class ApiServerTest {
 
@@ -46,6 +46,6 @@ class ApiServerTest {
         assertEquals(200, response.statusCode());
         List<Printer> actual = mapper.readValue(response.body(), new TypeReference<List<Printer>>() {
         });
-        assertEquals(NetworkPrinterDiscovery.discover(), actual);
+        assertEquals(PrinterRegistry.discoverAll(), actual);
     }
 }
