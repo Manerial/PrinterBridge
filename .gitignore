@@ -32,6 +32,10 @@ gradle-app.setting
 
 # Logs
 *.log
+*.stackdump
+
+# Classpath file generated ad hoc for manual `java -cp` runs
+cp.txt
 
 # OS
 .DS_Store

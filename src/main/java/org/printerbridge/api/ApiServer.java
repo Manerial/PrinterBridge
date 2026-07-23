@@ -1,8 +1,7 @@
 package org.printerbridge.api;
 
 import io.javalin.Javalin;
-import java.util.List;
-import org.printerbridge.printer.Printer;
+import org.printerbridge.transport.network.NetworkPrinterDiscovery;
 
 public final class ApiServer {
 
@@ -15,7 +14,7 @@ public final class ApiServer {
         return Javalin.create(config -> {
             config.jetty.host = BIND_HOST;
             config.jetty.port = port;
-            config.routes.get("/printers", ctx -> ctx.json(List.<Printer>of()));
+            config.routes.get("/printers", ctx -> ctx.json(NetworkPrinterDiscovery.discover()));
         }).start();
     }
 }
