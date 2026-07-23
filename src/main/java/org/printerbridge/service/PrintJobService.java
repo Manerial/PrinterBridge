@@ -4,6 +4,8 @@ import com.fazecast.jSerialComm.SerialPort;
 import java.awt.print.Printable;
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
 import javax.print.Doc;
 import javax.print.DocFlavor;
 import javax.print.DocPrintJob;
@@ -16,13 +18,17 @@ import org.printerbridge.printer.PrintContentType;
 
 public final class PrintJobService {
 
+    // Placeholder pending the broader error/timeout policy decision (CLAUDE.md, still open) —
+    // this only bounds how long a request waits for the single Bluetooth connection to free up.
+    private static final long LOCK_WAIT_SECONDS = 10;
+
     private PrintJobService() {
     }
 
     public static void print(String printerId, PrintContentType contentType, byte[] payload) {
         Optional<SerialPort> port = BluetoothPrinterDiscovery.findPort(printerId);
         if (port.isPresent()) {
-            printViaBluetooth(port.get(), contentType, payload);
+            printViaBluetooth(printerId, port.get(), contentType, payload);
             return;
         }
 
@@ -35,20 +41,38 @@ public final class PrintJobService {
         throw new PrintJobException("Unknown printer id: " + printerId);
     }
 
-    private static void printViaBluetooth(SerialPort port, PrintContentType contentType, byte[] payload) {
+    private static void printViaBluetooth(String printerId, SerialPort port, PrintContentType contentType,
+            byte[] payload) {
         if (contentType != PrintContentType.ESC_POS) {
             throw new PrintJobException("Bluetooth thermal printers only accept ESC_POS content, got " + contentType);
         }
-        if (!port.openPort()) {
-            throw new PrintJobException("Could not open Bluetooth port " + port.getSystemPortName());
-        }
+
+        Lock lock = PrinterLocks.forPrinter(printerId);
+        boolean acquired;
         try {
-            port.getOutputStream().write(payload);
-            port.getOutputStream().flush();
-        } catch (IOException e) {
-            throw new PrintJobException("Failed to write to Bluetooth port: " + e.getMessage());
+            acquired = lock.tryLock(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new PrintJobException("Interrupted while waiting to print on " + printerId);
+        }
+        if (!acquired) {
+            throw new PrintJobException("Printer " + printerId + " is busy printing another job, try again later");
+        }
+
+        try {
+            if (!port.openPort()) {
+                throw new PrintJobException("Could not open Bluetooth port " + port.getSystemPortName());
+            }
+            try {
+                port.getOutputStream().write(payload);
+                port.getOutputStream().flush();
+            } catch (IOException e) {
+                throw new PrintJobException("Failed to write to Bluetooth port: " + e.getMessage());
+            } finally {
+                port.closePort();
+            }
         } finally {
-            port.closePort();
+            lock.unlock();
         }
     }
 

@@ -4,6 +4,7 @@ import com.fazecast.jSerialComm.SerialPort;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.locks.Lock;
 import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterId;
 import org.printerbridge.printer.PrinterStatus;
@@ -23,7 +24,7 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
     public Optional<Printer> findById(String id) {
         return findPort(id)
                 .map(port -> new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL,
-                        testConnectivity(port)));
+                        testConnectivity(id, port)));
     }
 
     static Optional<SerialPort> findPort(String id) {
@@ -37,11 +38,21 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
         return new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL, PrinterStatus.UNKNOWN);
     }
 
-    private static PrinterStatus testConnectivity(SerialPort port) {
-        if (port.openPort()) {
-            port.closePort();
+    private static PrinterStatus testConnectivity(String id, SerialPort port) {
+        Lock lock = PrinterLocks.forPrinter(id);
+        if (!lock.tryLock()) {
+            // Already held by an in-flight print job: the connection is obviously alive right now,
+            // and we must not compete with it to open the single RFCOMM connection the device allows.
             return PrinterStatus.ONLINE;
         }
-        return PrinterStatus.OFFLINE;
+        try {
+            if (port.openPort()) {
+                port.closePort();
+                return PrinterStatus.ONLINE;
+            }
+            return PrinterStatus.OFFLINE;
+        } finally {
+            lock.unlock();
+        }
     }
 }
