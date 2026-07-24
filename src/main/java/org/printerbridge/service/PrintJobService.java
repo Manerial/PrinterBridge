@@ -64,13 +64,13 @@ public final class PrintJobService {
     public static void testPrint(String printerId) {
         Optional<SerialPort> port = BluetoothPrinterDiscovery.findPort(printerId);
         if (port.isPresent()) {
-            printViaBluetooth(printerId, port.get(), PrintContentType.ESC_POS, TestPrintPayloads.escPos());
+            printViaBluetooth(printerId, port.get(), PrintContentType.ESC_POS, TestPrintPayloads.escPos(printerId));
             return;
         }
 
         Optional<PrintService> service = NetworkPrinterDiscovery.findService(printerId);
         if (service.isPresent()) {
-            printViaNetwork(service.get(), PrintContentType.PDF, TestPrintPayloads.pdf());
+            printViaNetwork(service.get(), PrintContentType.PDF, TestPrintPayloads.pdf(printerId));
             return;
         }
 
