@@ -139,6 +139,23 @@ class ApiServerTest {
         assertTrue(firstMessage.get(5, TimeUnit.SECONDS).contains("Expected a JSON control message"));
     }
 
+    @Test
+    void testPrintReturnsErrorForUnknownPrinterId() throws IOException, InterruptedException {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + app.port() + "/printers/unknown/test-print"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("Unknown printer id"));
+    }
+
+    // Deliberately not tested here: a successful test-print against a real, discovered printer —
+    // it would actually attempt to print (cf. PrintJobServiceTest). Validate manually instead.
+
     private String sendPrintRequest(String printerId, PrintContentType contentType, int declaredSize, byte[] payload)
             throws Exception {
         CompletableFuture<String> firstMessage = new CompletableFuture<>();

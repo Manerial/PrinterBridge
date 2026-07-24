@@ -34,6 +34,14 @@ public final class ApiServer {
                 ctx.json(REGISTRY.findStatus(id)
                         .orElseThrow(() -> new NotFoundResponse("Unknown printer id: " + id)));
             });
+            config.routes.post("/printers/{id}/test-print", ctx -> {
+                try {
+                    PrintJobService.testPrint(ctx.pathParam("id"));
+                    ctx.json(PrintResult.ok());
+                } catch (PrintJobException e) {
+                    ctx.json(PrintResult.error(e.getMessage()));
+                }
+            });
             config.routes.ws("/printers/{id}/print", ws -> {
                 ws.onMessage(ApiServer::onControlMessage);
                 ws.onBinaryMessage(ApiServer::onPayload);
