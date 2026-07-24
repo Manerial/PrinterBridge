@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.Javalin;
 import io.javalin.http.NotFoundResponse;
+import io.javalin.http.staticfiles.Location;
 import io.javalin.websocket.WsBinaryMessageContext;
 import io.javalin.websocket.WsContext;
 import io.javalin.websocket.WsMessageContext;
@@ -17,6 +18,7 @@ import org.printerbridge.service.PrinterRegistry;
 public final class ApiServer {
 
     private static final String BIND_HOST = "127.0.0.1";
+    public static final String TEST_PAGE_PATH = "/test.html";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Map<WsContext, PrintControlMessage> PENDING_CONTROL = new ConcurrentHashMap<>();
     private static final PrinterRegistry REGISTRY = new PrinterRegistry();
@@ -28,6 +30,11 @@ public final class ApiServer {
         return Javalin.create(config -> {
             config.jetty.host = BIND_HOST;
             config.jetty.port = port;
+            config.staticFiles.add(staticFiles -> {
+                staticFiles.hostedPath = "/";
+                staticFiles.directory = "/static";
+                staticFiles.location = Location.CLASSPATH;
+            });
             config.routes.get("/printers", ctx -> ctx.json(REGISTRY.discoverAll()));
             config.routes.get("/printers/{id}/status", ctx -> {
                 String id = ctx.pathParam("id");

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Test PrinterBridge</title>
+<style>
+  body { font-family: sans-serif; max-width: 500px; margin: 2rem auto; }
+  input { width: 100%; padding: 0.4rem; box-sizing: border-box; margin: 0.3rem 0 1rem; }
+  button { padding: 0.5rem 1rem; margin-right: 0.5rem; margin-bottom: 0.5rem; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Test PrinterBridge</h1>
+<p>Page de test locale, servie directement par PrinterBridge (pas d'appel réseau externe).</p>
+
+<button onclick="openInNewTab('/printers')">Lister les imprimantes (GET)</button>
+
+<hr>
+
+<label for="printerId">ID imprimante</label>
+<input id="printerId" type="text" placeholder="ex: 92f5acada2e5a652">
+
+<button onclick="checkStatus()">Vérifier le statut (GET)</button>
+
+<form id="testPrintForm" method="POST" target="_blank" onsubmit="return prepareTestPrint()">
+  <button type="submit">Test d'impression (POST)</button>
+</form>
+
+<script>
+  function getPrinterId() {
+    const id = document.getElementById("printerId").value.trim();
+    if (!id) {
+      alert("Entre d'abord un ID d'imprimante.");
+      return null;
+    }
+    return id;
+  }
+
+  function openInNewTab(path) {
+    window.open(path, "_blank");
+  }
+
+  function checkStatus() {
+    const id = getPrinterId();
+    if (!id) return;
+    openInNewTab("/printers/" + encodeURIComponent(id) + "/status");
+  }
+
+  function prepareTestPrint() {
+    const id = getPrinterId();
+    if (!id) return false;
+    document.getElementById("testPrintForm").action =
+      "/printers/" + encodeURIComponent(id) + "/test-print";
+    return true; // laisse le formulaire se soumettre normalement
+  }
+</script>
+</body>
+</html>

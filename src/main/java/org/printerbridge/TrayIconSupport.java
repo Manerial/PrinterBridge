@@ -2,6 +2,7 @@ package org.printerbridge;
 
 import java.awt.AWTException;
 import java.awt.Color;
+import java.awt.Desktop;
 import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.MenuItem;
@@ -10,6 +11,9 @@ import java.awt.RenderingHints;
 import java.awt.SystemTray;
 import java.awt.TrayIcon;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.net.URI;
+import org.printerbridge.api.ApiServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +40,13 @@ public final class TrayIconSupport {
         }
 
         PopupMenu menu = new PopupMenu();
+
+        MenuItem testPageItem = new MenuItem("Ouvrir la page de test");
+        testPageItem.addActionListener(event -> openTestPage(port));
+        menu.add(testPageItem);
+
+        menu.addSeparator();
+
         MenuItem quitItem = new MenuItem("Quitter");
         quitItem.addActionListener(event -> {
             LOG.info("Quit requested from the tray icon.");
@@ -51,6 +62,19 @@ public final class TrayIconSupport {
             SystemTray.getSystemTray().add(trayIcon);
         } catch (AWTException e) {
             LOG.warn("Failed to install the tray icon; running without one.", e);
+        }
+    }
+
+    private static void openTestPage(int port) {
+        URI uri = URI.create("http://127.0.0.1:" + port + ApiServer.TEST_PAGE_PATH);
+        if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+            LOG.warn("No supported way to open a browser automatically; open manually: {}", uri);
+            return;
+        }
+        try {
+            Desktop.getDesktop().browse(uri);
+        } catch (IOException e) {
+            LOG.warn("Failed to open the test page in a browser: {}", uri, e);
         }
     }
 
