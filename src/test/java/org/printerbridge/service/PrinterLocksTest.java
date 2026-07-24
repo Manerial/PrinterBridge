@@ -1,6 +1,7 @@
 package org.printerbridge.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,5 +60,21 @@ class PrinterLocksTest {
 
         assertTrue(doneLatch.await(5, TimeUnit.SECONDS));
         assertEquals(1, maxConcurrentExecutions.get());
+    }
+
+    @Test
+    void isNotStuckByDefault() {
+        assertFalse(PrinterLocks.isStuck("fresh-id"));
+    }
+
+    @Test
+    void marksAndClearsAPrinterAsStuck() {
+        String printerId = "stuck-printer";
+
+        PrinterLocks.markStuck(printerId);
+        assertTrue(PrinterLocks.isStuck(printerId));
+
+        PrinterLocks.clearStuck(printerId);
+        assertFalse(PrinterLocks.isStuck(printerId));
     }
 }

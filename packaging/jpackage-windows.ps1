@@ -29,3 +29,11 @@ jpackage `
     --win-menu `
     --win-shortcut `
     --win-dir-chooser
+
+# $ErrorActionPreference = "Stop" does NOT apply to a native executable's exit code — only to
+# PowerShell/.NET errors. Without this check, a jpackage failure (e.g. WiX Toolset missing from
+# PATH) would leave the script exiting 0, and a CI step consuming its output (upload-artifact,
+# default "warn" on no files found) could report success despite no .msi ever being produced.
+if ($LASTEXITCODE -ne 0) {
+    throw "jpackage failed with exit code $LASTEXITCODE"
+}

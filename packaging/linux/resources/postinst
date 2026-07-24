@@ -18,7 +18,16 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
 UNIT
+
+# Deliberately not attempting `systemctl --user daemon-reload` here: this script runs as root
+# during dpkg, with no reliable/portable way to reach into the admin's already-running --user
+# session bus (which user, which session, is one even active). Modern systemd (present on Debian
+# 11+/Ubuntu 20.04+, both well past systemd 245) watches unit search paths — including
+# /usr/lib/systemd/user — via inotify and picks up a newly dropped unit file on its own, without a
+# manual reload. If `systemctl --user status printerbridge` ever reports "not found" right after
+# install regardless, the fallback is a manual `systemctl --user daemon-reload` — see
+# packaging/linux/TESTING.md.
 
 exit 0

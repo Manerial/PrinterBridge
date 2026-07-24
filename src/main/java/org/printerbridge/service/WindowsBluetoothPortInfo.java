@@ -3,8 +3,6 @@ package org.printerbridge.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -23,13 +21,25 @@ import org.slf4j.LoggerFactory;
  * artifacts (e.g. a local loopback SPP channel) carry "LOCALMFG" instead. Windows-only, backed by
  * WMI via PowerShell; fails open (returns no info at all) on any error, so a query failure never
  * hides a real printer — callers must treat "no entry for this port" as "keep it, unknown".
- * No Linux/macOS equivalent exists yet.
+ * See {@link LinuxBluetoothPortInfo} for the Linux equivalent (different signal, fails closed
+ * instead). No macOS equivalent exists yet.
  */
 final class WindowsBluetoothPortInfo {
 
     private static final Logger LOG = LoggerFactory.getLogger(WindowsBluetoothPortInfo.class);
     private static final Pattern MAC_BEFORE_SUFFIX = Pattern.compile("([0-9A-Fa-f]{12})_[^\\\\]*$");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final long COMMAND_TIMEOUT_SECONDS = 10;
+    // GET /printers, GET /printers/{id}/status, and every print()/testPrint() call (via
+    // BluetoothPrinterDiscovery.findPort) each trigger a fresh query — without a short cache, a
+    // PluriBourse status-polling loop would spawn a powershell.exe process per call. Short enough
+    // that a newly (un)paired device still shows up within a few seconds.
+    private static final long CACHE_TTL_NANOS = TimeUnit.SECONDS.toNanos(5);
+
+    private static volatile CachedResult cache;
+
+    private record CachedResult(long timestampNanos, Map<String, PortInfo> value) {
+    }
 
     // Une seule invocation de powershell.exe pour les deux requêtes WMI : deux process séparés
     // doublaient le coût de démarrage du moteur PowerShell (le vrai coût, bien avant celui de la
@@ -39,7 +49,7 @@ final class WindowsBluetoothPortInfo {
             + "$ports = Get-CimInstance Win32_SerialPort | Select-Object DeviceID, PNPDeviceID; "
             + "[PSCustomObject]@{ Devices = $devices; Ports = $ports } | ConvertTo-Json -Depth 4";
 
-    record PortInfo(boolean realRemoteDevice, String friendlyName) {
+    record PortInfo(boolean realRemoteDevice, String friendlyName, String mac) {
     }
 
     private WindowsBluetoothPortInfo() {
@@ -49,17 +59,28 @@ final class WindowsBluetoothPortInfo {
         if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
             return Map.of();
         }
+        CachedResult cached = cache;
+        long now = System.nanoTime();
+        if (cached != null && (now - cached.timestampNanos()) < CACHE_TTL_NANOS) {
+            return cached.value();
+        }
+
+        Map<String, PortInfo> queried;
         try {
             JsonNode result = runPowerShellJson(COMBINED_QUERY_SCRIPT);
             Map<String, String> macToFriendlyName = parseBluetoothDeviceNames(result.path("Devices"));
-            return parsePortInfo(result.path("Ports"), macToFriendlyName);
+            queried = parsePortInfo(result.path("Ports"), macToFriendlyName);
         } catch (Exception e) {
             LOG.warn("Could not query Windows Bluetooth port info; no filtering/enrichment will be applied.", e);
-            return Map.of();
+            queried = Map.of();
         }
+        // A failed query is cached too (as the safe fail-open empty map): a broken/absent WMI query
+        // shouldn't turn every call into a fresh multi-second PowerShell invocation either.
+        cache = new CachedResult(now, queried);
+        return queried;
     }
 
-    private static Map<String, String> parseBluetoothDeviceNames(JsonNode devices) {
+    static Map<String, String> parseBluetoothDeviceNames(JsonNode devices) {
         Map<String, String> macToName = new HashMap<>();
         for (JsonNode device : asArray(devices)) {
             String instanceId = device.path("InstanceId").asText("");
@@ -73,7 +94,7 @@ final class WindowsBluetoothPortInfo {
         return macToName;
     }
 
-    private static Map<String, PortInfo> parsePortInfo(JsonNode ports, Map<String, String> macToFriendlyName) {
+    static Map<String, PortInfo> parsePortInfo(JsonNode ports, Map<String, String> macToFriendlyName) {
         Map<String, PortInfo> result = new HashMap<>();
         for (JsonNode port : asArray(ports)) {
             String deviceId = port.path("DeviceID").asText("");
@@ -82,13 +103,13 @@ final class WindowsBluetoothPortInfo {
                 continue;
             }
             if (pnpDeviceId.contains("LOCALMFG")) {
-                result.put(deviceId, new PortInfo(false, null));
+                result.put(deviceId, new PortInfo(false, null, null));
                 continue;
             }
             Matcher matcher = MAC_BEFORE_SUFFIX.matcher(pnpDeviceId);
             if (matcher.find()) {
                 String mac = matcher.group(1).toUpperCase(Locale.ROOT);
-                result.put(deviceId, new PortInfo(true, macToFriendlyName.get(mac)));
+                result.put(deviceId, new PortInfo(true, macToFriendlyName.get(mac), mac));
             }
         }
         return result;
@@ -107,17 +128,8 @@ final class WindowsBluetoothPortInfo {
     }
 
     private static JsonNode runPowerShellJson(String command) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command", command);
-        Process process = builder.start();
-        String output;
-        try (InputStream in = process.getInputStream()) {
-            output = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        boolean finished = process.waitFor(10, TimeUnit.SECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            throw new IOException("PowerShell query timed out");
-        }
+        String output = ExternalProcess.run(COMMAND_TIMEOUT_SECONDS,
+                "powershell", "-NoProfile", "-NonInteractive", "-Command", command);
         if (output.isBlank()) {
             return MAPPER.createArrayNode();
         }

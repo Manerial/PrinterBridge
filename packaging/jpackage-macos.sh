@@ -11,7 +11,11 @@
 
 set -euo pipefail
 
-VERSION=$(sed -n 's/.*<version>\(.*\)<\/version>.*/\1/p' pom.xml | head -1)
+# A sed/regex scrape of pom.xml would grab the first <version> tag in the file regardless of
+# nesting (a dependency's <version> would match just as well as the project's own) — it only
+# happened to work here because the project's <version> is declared before any dependency's.
+# mvn help:evaluate resolves the actual effective project.version instead.
+VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
 # jpackage --app-version requires a plain numeric X.Y.Z, no "-SNAPSHOT"/qualifier suffix.
 APP_VERSION=$(echo "$VERSION" | sed 's/-.*$//')
 
