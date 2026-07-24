@@ -3,6 +3,7 @@ package org.printerbridge.service;
 import com.fazecast.jSerialComm.SerialPort;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.locks.Lock;
@@ -16,47 +17,90 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
     @Override
     public List<Printer> discover() {
         Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo = WindowsBluetoothPortInfo.query();
+        Map<String, String> linuxMacs = LinuxBluetoothPortInfo.queryMacAddresses();
+        Map<String, String> linuxFriendlyNames = LinuxBluetoothPortInfo.queryFriendlyNames();
         return Arrays.stream(SerialPort.getCommPorts())
                 .filter(port -> isLikelyRealDevice(port, portInfo))
-                .map(port -> toPrinter(port, portInfo))
+                .map(port -> toPrinter(port, portInfo, linuxMacs, linuxFriendlyNames))
                 .toList();
     }
 
     @Override
     public Optional<Printer> findById(String id) {
         Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo = WindowsBluetoothPortInfo.query();
-        return findPort(id, portInfo)
-                .map(port -> new Printer(id, displayName(port, portInfo), PrinterType.BLUETOOTH_THERMAL,
-                        testConnectivity(id, port)));
+        Map<String, String> linuxMacs = LinuxBluetoothPortInfo.queryMacAddresses();
+        Map<String, String> linuxFriendlyNames = LinuxBluetoothPortInfo.queryFriendlyNames();
+        return findPort(id, portInfo, linuxMacs)
+                .map(port -> new Printer(id, displayName(port, portInfo, linuxFriendlyNames),
+                        PrinterType.BLUETOOTH_THERMAL, testConnectivity(id, port)));
     }
 
     static Optional<SerialPort> findPort(String id) {
-        return findPort(id, WindowsBluetoothPortInfo.query());
+        return findPort(id, WindowsBluetoothPortInfo.query(), LinuxBluetoothPortInfo.queryMacAddresses());
     }
 
-    private static Optional<SerialPort> findPort(String id, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
+    private static Optional<SerialPort> findPort(String id, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
+            Map<String, String> linuxMacs) {
         return Arrays.stream(SerialPort.getCommPorts())
                 .filter(port -> isLikelyRealDevice(port, portInfo))
-                .filter(port -> PrinterId.derive(port.getSystemPortName()).equals(id))
+                .filter(port -> PrinterId.derive(physicalKey(port, portInfo, linuxMacs)).equals(id))
                 .findFirst();
     }
 
     private static boolean isLikelyRealDevice(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
-        // No entry for this port (non-Windows, query failed, or WMI simply doesn't know it) means
-        // we can't tell either way — fail open and keep it rather than risk hiding a real printer.
+        if (LinuxBluetoothPortInfo.isLinux()) {
+            // Reliable naming signal on Linux (see LinuxBluetoothPortInfo) — fail closed instead of
+            // open, otherwise every serial device on the box would show up as a thermal printer.
+            return LinuxBluetoothPortInfo.isLikelyRfcommDevice(port.getSystemPortName());
+        }
+        // No entry for this port (query failed, or WMI simply doesn't know it) means we can't tell
+        // either way — fail open and keep it rather than risk hiding a real printer.
         WindowsBluetoothPortInfo.PortInfo info = portInfo.get(port.getSystemPortName());
         return info == null || info.realRemoteDevice();
     }
 
-    private static Printer toPrinter(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
-        String id = PrinterId.derive(port.getSystemPortName());
-        return new Printer(id, displayName(port, portInfo), PrinterType.BLUETOOTH_THERMAL, PrinterStatus.UNKNOWN);
+    private static Printer toPrinter(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
+            Map<String, String> linuxMacs, Map<String, String> linuxFriendlyNames) {
+        String id = PrinterId.derive(physicalKey(port, portInfo, linuxMacs));
+        return new Printer(id, displayName(port, portInfo, linuxFriendlyNames), PrinterType.BLUETOOTH_THERMAL,
+                PrinterStatus.UNKNOWN);
     }
 
-    private static String displayName(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
+    /**
+     * The value {@link PrinterId} hashes into a printer's id. Prefers the device's Bluetooth MAC —
+     * requested explicitly because it never changes, unlike a COM/rfcomm port number which the OS
+     * can reassign to the same physical device across a re-pair — and falls back to the system port
+     * name only when no MAC is known for this port (query failed, WMI/rfcomm doesn't know this
+     * device, or a non-Windows/non-Linux OS). MAC formatting differs by source (Windows: 12 hex
+     * chars, no separator; Linux: colon-separated) — normalized here so the same physical address
+     * always hashes to the same id regardless of which OS resolved it.
+     */
+    static String physicalKey(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
+            Map<String, String> linuxMacs) {
+        WindowsBluetoothPortInfo.PortInfo info = portInfo.get(port.getSystemPortName());
+        if (info != null && info.mac() != null) {
+            return normalizeMac(info.mac());
+        }
+        String linuxMac = linuxMacs.get(port.getSystemPortName());
+        if (linuxMac != null) {
+            return normalizeMac(linuxMac);
+        }
+        return port.getSystemPortName();
+    }
+
+    private static String normalizeMac(String mac) {
+        return mac.replace(":", "").toUpperCase(Locale.ROOT);
+    }
+
+    private static String displayName(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
+            Map<String, String> linuxFriendlyNames) {
         WindowsBluetoothPortInfo.PortInfo info = portInfo.get(port.getSystemPortName());
         if (info != null && info.friendlyName() != null && !info.friendlyName().isBlank()) {
             return info.friendlyName();
+        }
+        String linuxName = linuxFriendlyNames.get(port.getSystemPortName());
+        if (linuxName != null && !linuxName.isBlank()) {
+            return linuxName;
         }
         return port.getDescriptivePortName();
     }
@@ -64,9 +108,12 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
     private static PrinterStatus testConnectivity(String id, SerialPort port) {
         Lock lock = PrinterLocks.forPrinter(id);
         if (!lock.tryLock()) {
-            // Already held by an in-flight print job: the connection is obviously alive right now,
+            // Normally held by an in-flight print job: the connection is obviously alive right now,
             // and we must not compete with it to open the single RFCOMM connection the device allows.
-            return PrinterStatus.ONLINE;
+            // Exception: a write that PrintJobService.writeWithTimeout gave up on keeps this lock held
+            // until that abandoned write eventually returns on its own — which for a truly dead link
+            // may be never. Reporting ONLINE in that case would be a permanent, silent lie.
+            return PrinterLocks.isStuck(id) ? PrinterStatus.OFFLINE : PrinterStatus.ONLINE;
         }
         try {
             if (port.openPort()) {

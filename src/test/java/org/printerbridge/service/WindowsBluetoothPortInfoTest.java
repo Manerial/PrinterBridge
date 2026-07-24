@@ -1,21 +1,68 @@
 package org.printerbridge.service;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class WindowsBluetoothPortInfoTest {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     @Test
     void queryNeverThrowsAndReturnsAUsableMap() {
         Map<String, WindowsBluetoothPortInfo.PortInfo> result = assertDoesNotThrow(WindowsBluetoothPortInfo::query);
         assertNotNull(result);
+    }
 
-        // Manual inspection aid while validating against real hardware; not an assertion.
-        result.forEach((port, info) ->
-                System.out.println(port + " -> realRemoteDevice=" + info.realRemoteDevice()
-                        + ", friendlyName=" + info.friendlyName()));
+    @Test
+    void parsesBluetoothDeviceNamesFromInstanceId() {
+        ArrayNode devices = MAPPER.createArrayNode();
+        devices.addObject()
+                .put("InstanceId", "BTHENUM-DEV_aabbccddeeff-7&1234&0&0000")
+                .put("FriendlyName", "Star Thermal Printer");
+
+        Map<String, String> result = WindowsBluetoothPortInfo.parseBluetoothDeviceNames(devices);
+
+        assertEquals(Map.of("AABBCCDDEEFF", "Star Thermal Printer"), result);
+    }
+
+    @Test
+    void parsePortInfoFlagsLocalmfgAsNotARealDevice() {
+        ArrayNode ports = MAPPER.createArrayNode();
+        ports.addObject()
+                .put("DeviceID", "COM5")
+                .put("PNPDeviceID", "BTHENUM-{0000110E}_LOCALMFG&0000-7&1234&0&0000");
+
+        Map<String, WindowsBluetoothPortInfo.PortInfo> result = WindowsBluetoothPortInfo.parsePortInfo(ports, Map.of());
+
+        assertEquals(new WindowsBluetoothPortInfo.PortInfo(false, null, null), result.get("COM5"));
+    }
+
+    @Test
+    void parsePortInfoMatchesRealDeviceByMacAndEnrichesWithFriendlyName() {
+        ArrayNode ports = MAPPER.createArrayNode();
+        ports.addObject()
+                .put("DeviceID", "COM7")
+                .put("PNPDeviceID", "BTHENUM-{0000110E}-7&1234&0&aabbccddeeff_0000");
+
+        Map<String, WindowsBluetoothPortInfo.PortInfo> result = WindowsBluetoothPortInfo.parsePortInfo(
+                ports, Map.of("AABBCCDDEEFF", "Star Thermal Printer"));
+
+        assertEquals(new WindowsBluetoothPortInfo.PortInfo(true, "Star Thermal Printer", "AABBCCDDEEFF"), result.get("COM7"));
+    }
+
+    @Test
+    void parsePortInfoSkipsPortsWithoutADeviceId() {
+        ArrayNode ports = MAPPER.createArrayNode();
+        ports.addObject().put("DeviceID", "").put("PNPDeviceID", "aabbccddeeff_0000");
+
+        Map<String, WindowsBluetoothPortInfo.PortInfo> result = WindowsBluetoothPortInfo.parsePortInfo(ports, Map.of());
+
+        assertEquals(Map.of(), result);
     }
 }

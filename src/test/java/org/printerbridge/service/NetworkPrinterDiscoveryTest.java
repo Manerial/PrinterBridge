@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterType;
@@ -34,9 +35,10 @@ class NetworkPrinterDiscoveryTest {
     @Test
     void findByIdMatchesDiscoveredPrinterWhenOneExists() {
         List<Printer> printers = discovery.discover();
-        if (printers.isEmpty()) {
-            return;
-        }
+        // Skip visibly (SKIPPED in the test report) rather than pass silently when no network
+        // printer is installed on the machine running the test — see ApiServerTest for the same
+        // pattern and rationale.
+        Assumptions.assumeTrue(!printers.isEmpty(), "No network printer discovered on this machine — skipping");
         Printer expected = printers.get(0);
 
         assertEquals(Optional.of(expected), discovery.findById(expected.id()));

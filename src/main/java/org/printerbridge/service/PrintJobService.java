@@ -2,13 +2,13 @@ package org.printerbridge.service;
 
 import com.fazecast.jSerialComm.SerialPort;
 import java.awt.print.Printable;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.Lock;
@@ -21,8 +21,12 @@ import javax.print.SimpleDoc;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.printerbridge.printer.PrintContentType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class PrintJobService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PrintJobService.class);
 
     // Placeholder pending the broader error/timeout policy decision (CLAUDE.md, still open) —
     // this only bounds how long a request waits for the single Bluetooth connection to free up.
@@ -35,6 +39,13 @@ public final class PrintJobService {
     // by running the write on a separate thread and force-closing the port if it doesn't return
     // in time — closing out from under a blocked native write reliably unblocks it.
     private static final long WRITE_TIMEOUT_SECONDS = 10;
+
+    // Shared rather than one-per-call: jSerialComm's write() blocks in native (JNI) code, which
+    // pins whatever thread runs it — including a virtual thread's carrier, with no benefit over a
+    // platform thread — so a stuck write leaks a thread either way. A shared cached pool at least
+    // avoids paying OS thread create/teardown cost on every single (normally fast) write.
+    private static final ExecutorService WRITE_EXECUTOR =
+            Executors.newCachedThreadPool(PrintJobService::newDaemonThread);
 
     private PrintJobService() {
     }
@@ -52,7 +63,7 @@ public final class PrintJobService {
             return;
         }
 
-        throw new PrintJobException("Unknown printer id: " + printerId);
+        throw new UnknownPrinterException(printerId);
     }
 
     /**
@@ -74,14 +85,19 @@ public final class PrintJobService {
             return;
         }
 
-        throw new PrintJobException("Unknown printer id: " + printerId);
+        throw new UnknownPrinterException(printerId);
+    }
+
+    static void requireContentType(PrintContentType actual, PrintContentType expected, String transportDescription) {
+        if (actual != expected) {
+            throw new PrintJobException(
+                    transportDescription + " printers only accept " + expected + " content, got " + actual);
+        }
     }
 
     private static void printViaBluetooth(String printerId, SerialPort port, PrintContentType contentType,
             byte[] payload) {
-        if (contentType != PrintContentType.ESC_POS) {
-            throw new PrintJobException("Bluetooth thermal printers only accept ESC_POS content, got " + contentType);
-        }
+        requireContentType(contentType, PrintContentType.ESC_POS, "Bluetooth thermal");
 
         Lock lock = PrinterLocks.forPrinter(printerId);
         boolean acquired;
@@ -95,42 +111,77 @@ public final class PrintJobService {
             throw new PrintJobException("Printer " + printerId + " is busy printing another job, try again later");
         }
 
+        // Only released synchronously in the normal/failed-fast cases. On a write timeout, the
+        // abandoned write is still running on WRITE_EXECUTOR (see writeWithTimeout) and may still be
+        // touching the port when this method returns — releasing the lock here would let a second
+        // job for the same printer id race it for the RFCOMM connection, exactly what PrinterLocks
+        // exists to prevent. In that case the lock is instead released once the abandoned write
+        // actually finishes (see the StuckWriteException handling below).
+        CompletableFuture<Void> abandonedWrite = null;
         try {
             if (!port.openPort()) {
                 throw new PrintJobException("Could not open Bluetooth port " + port.getSystemPortName());
             }
             try {
                 writeWithTimeout(port, payload);
+            } catch (StuckWriteException e) {
+                abandonedWrite = e.pendingWrite;
+                PrinterLocks.markStuck(printerId);
+                throw new PrintJobException(e.getMessage());
             } finally {
                 port.closePort();
             }
         } finally {
-            lock.unlock();
+            if (abandonedWrite == null) {
+                lock.unlock();
+            } else {
+                CompletableFuture<Void> pendingWrite = abandonedWrite;
+                pendingWrite.whenComplete((ignoredResult, ignoredError) -> {
+                    PrinterLocks.clearStuck(printerId);
+                    lock.unlock();
+                });
+            }
+        }
+    }
+
+    /** Carries the still-running write task out of {@link #writeWithTimeout} so its caller can defer
+     * releasing the printer lock until that abandoned write actually finishes, instead of the moment
+     * it times out. */
+    private static final class StuckWriteException extends RuntimeException {
+        private final CompletableFuture<Void> pendingWrite;
+
+        StuckWriteException(String message, CompletableFuture<Void> pendingWrite) {
+            super(message);
+            this.pendingWrite = pendingWrite;
         }
     }
 
     private static void writeWithTimeout(SerialPort port, byte[] payload) {
-        ExecutorService executor = Executors.newSingleThreadExecutor(PrintJobService::newDaemonThread);
-        try {
-            Future<?> write = executor.submit(() -> {
+        CompletableFuture<Void> write = CompletableFuture.runAsync(() -> {
+            try {
                 port.getOutputStream().write(payload);
                 port.getOutputStream().flush();
-                return null;
-            });
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }, WRITE_EXECUTOR);
+
+        try {
             write.get(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             // Force-closing out from under the stuck native write is what actually unblocks it;
             // the caller's own `finally { port.closePort(); }` will then be a harmless no-op.
+            // The write task itself is left running on WRITE_EXECUTOR — it isn't cancelled,
+            // since interrupting a thread pinned in native code wouldn't do anything anyway.
             port.closePort();
-            throw new PrintJobException(
-                    "Timed out writing to Bluetooth port " + port.getSystemPortName() + " (dead or wrong link)");
+            throw new StuckWriteException(
+                    "Timed out writing to Bluetooth port " + port.getSystemPortName() + " (dead or wrong link)",
+                    write);
         } catch (ExecutionException e) {
             throw new PrintJobException("Failed to write to Bluetooth port: " + e.getCause().getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new PrintJobException("Interrupted while writing to Bluetooth port " + port.getSystemPortName());
-        } finally {
-            executor.shutdownNow();
         }
     }
 
@@ -141,9 +192,7 @@ public final class PrintJobService {
     }
 
     private static void printViaNetwork(PrintService service, PrintContentType contentType, byte[] payload) {
-        if (contentType != PrintContentType.PDF) {
-            throw new PrintJobException("Network/A4 printers only accept PDF content, got " + contentType);
-        }
+        requireContentType(contentType, PrintContentType.PDF, "Network/A4");
         try (PDDocument document = Loader.loadPDF(payload)) {
             Printable printable = new PdfPrintable(document);
             Doc doc = new SimpleDoc(printable, DocFlavor.SERVICE_FORMATTED.PRINTABLE, null);
@@ -153,6 +202,15 @@ public final class PrintJobService {
             throw new PrintJobException("Failed to read PDF payload: " + e.getMessage());
         } catch (PrintException e) {
             throw new PrintJobException("Failed to submit print job: " + e.getMessage());
+        } catch (RuntimeException e) {
+            // PDFBox rendering (PdfPrintable, invoked synchronously by job.print()) can fail in ways
+            // that aren't IOException/PrintException for a malformed-but-openable PDF; without this,
+            // the exception would escape all the way to the WS handler and leave the caller hanging
+            // with no PrintResult at all. Logged at ERROR with the full stack trace (and attached as
+            // cause) so an unrelated programming error isn't silently mislabeled as a PDF problem —
+            // the client-facing message stays generic, but the real cause is still diagnosable here.
+            LOG.error("Unexpected failure while rendering/printing a PDF job", e);
+            throw new PrintJobException("Failed to render or print PDF: " + e.getMessage(), e);
         }
     }
 }

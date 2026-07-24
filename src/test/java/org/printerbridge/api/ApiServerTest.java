@@ -13,11 +13,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.PrintContentType;
@@ -40,6 +42,23 @@ class ApiServerTest {
     @AfterEach
     void stopServer() {
         app.stop();
+    }
+
+    @Test
+    void rejectsRequestsWithAMismatchedOrigin() throws IOException, InterruptedException {
+        // Loopback binding alone doesn't stop another site open in the admin's browser from calling
+        // this API (see CLAUDE.md / enforceSameOrigin in ApiServer) — a request carrying a foreign
+        // Origin header must be rejected outright, even though it targets 127.0.0.1 like everyone else.
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + app.port() + "/printers"))
+                .header("Origin", "http://evil.example")
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(403, response.statusCode());
     }
 
     @Test
@@ -74,9 +93,10 @@ class ApiServerTest {
     @Test
     void statusReturns200ForAKnownPrinter() throws IOException, InterruptedException {
         List<Printer> printers = registry.discoverAll();
-        if (printers.isEmpty()) {
-            return;
-        }
+        // Skip rather than silently pass: without a real printer discovered on the machine running
+        // the test (the case on a bare CI runner), there'd be nothing left to assert — an
+        // "assumeTrue" abort shows up as SKIPPED in the test report, unlike a bare early return.
+        Assumptions.assumeTrue(!printers.isEmpty(), "No printer discovered on this machine — skipping");
         Printer expected = printers.get(0);
 
         HttpClient client = HttpClient.newHttpClient();
@@ -107,9 +127,9 @@ class ApiServerTest {
                 .filter(printer -> printer.type() == PrinterType.NETWORK)
                 .findFirst()
                 .orElse(null);
-        if (network == null) {
-            return;
-        }
+        // Same reasoning as statusReturns200ForAKnownPrinter above: skip visibly rather than pass
+        // silently when no network printer is installed on the machine running the test.
+        Assumptions.assumeTrue(network != null, "No network printer discovered on this machine — skipping");
 
         byte[] payload = {1, 2, 3};
         String response = sendPrintRequest(network.id(), PrintContentType.ESC_POS, payload.length, payload);
@@ -123,6 +143,18 @@ class ApiServerTest {
         String response = sendPrintRequest("unknown", PrintContentType.PDF, payload.length + 1, payload);
 
         assertTrue(response.contains("does not match"));
+    }
+
+    @Test
+    void acceptsPayloadsLargerThanTheDefaultWebSocketMessageLimit() throws Exception {
+        // Jetty's default WS message cap is 64 KB; this is comfortably past it, standing in for a
+        // real A4 label PDF. Targets an unknown id so it fails fast on content, not on transport.
+        byte[] payload = new byte[200_000];
+        Arrays.fill(payload, (byte) 1);
+
+        String response = sendPrintRequest("unknown", PrintContentType.PDF, payload.length, payload);
+
+        assertTrue(response.contains("Unknown printer id"));
     }
 
     @Test
@@ -149,8 +181,9 @@ class ApiServerTest {
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("Unknown printer id"));
+        // Consistent with statusReturns404ForUnknownId: an unknown id is a 404, not a 200 carrying
+        // an error body — see UnknownPrinterException.
+        assertEquals(404, response.statusCode());
     }
 
     // Deliberately not tested here: a successful test-print against a real, discovered printer —

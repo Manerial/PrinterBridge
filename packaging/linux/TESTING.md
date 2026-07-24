@@ -48,6 +48,16 @@ sudo dpkg -i target/dist/printerbridge_*.deb
 systemctl --user status printerbridge
 ```
 
+**Si ça répond "Unit printerbridge.service could not be found"** : `postinst` dépose le fichier
+d'unité mais n'appelle jamais `daemon-reload` lui-même (il tourne en root pendant `dpkg`, sans
+accès à ta session `--user` — voir le commentaire dans `packaging/linux/resources/postinst`). Sur
+un systemd récent (Debian 11+/Ubuntu 20.04+), le nouveau fichier est normalement détecté tout seul
+via inotify ; si ce n'est pas le cas ici, force-le à la main puis relance la commande ci-dessus :
+
+```sh
+systemctl --user daemon-reload
+```
+
 Doit afficher quelque chose comme `inactive (dead)` — l'unité existe mais rien ne tourne. Vérifie
 aussi qu'elle n'est pas activée au boot :
 
@@ -109,8 +119,11 @@ main avant (`systemctl --user stop printerbridge`) si besoin.
 ## Ce qui manque encore, volontairement pas fait ici
 
 Aucun raccourci (icône bureau / menu applications) ne passe encore par `systemctl --user start` —
-il faut taper la commande à la main pour l'instant. La raison : le vrai geste "admin clique une
-icône" suppose l'icône barre système (pas encore codée), et faire fonctionner un service
-`systemd --user` dans une session graphique (accès à `DISPLAY`/Wayland pour `SystemTray`) est un
+il faut taper la commande à la main pour l'instant. L'icône barre système elle-même est bien
+implémentée (`TrayIconSupport`, lancée directement par le binaire, cf. CLAUDE.md) et fonctionne
+pour lancer PrinterBridge "en direct" ; ce qui manque est le lien entre ce geste et le service
+supervisé par systemd (démarrer via `systemctl --user start` plutôt que le binaire brut, pour
+bénéficier de `Restart=on-failure` depuis un vrai clic admin). Faire fonctionner un service
+`systemd --user` dans une session graphique (accès à `DISPLAY`/Wayland pour `SystemTray`) reste un
 point d'incertitude à part entière selon la distro/l'environnement de bureau — pas quelque chose à
-deviner sans machine réelle pour tester. À reprendre une fois l'icône barre système implémentée.
+deviner sans machine réelle pour tester.
