@@ -31,6 +31,14 @@ final class WindowsBluetoothPortInfo {
     private static final Pattern MAC_BEFORE_SUFFIX = Pattern.compile("([0-9A-Fa-f]{12})_[^\\\\]*$");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    // Une seule invocation de powershell.exe pour les deux requêtes WMI : deux process séparés
+    // doublaient le coût de démarrage du moteur PowerShell (le vrai coût, bien avant celui de la
+    // requête WMI elle-même), ce qui rendait GET /printers perceptiblement lent.
+    private static final String COMBINED_QUERY_SCRIPT =
+            "$devices = Get-PnpDevice -Class Bluetooth | Select-Object FriendlyName, InstanceId; "
+            + "$ports = Get-CimInstance Win32_SerialPort | Select-Object DeviceID, PNPDeviceID; "
+            + "[PSCustomObject]@{ Devices = $devices; Ports = $ports } | ConvertTo-Json -Depth 4";
+
     record PortInfo(boolean realRemoteDevice, String friendlyName) {
     }
 
@@ -42,17 +50,16 @@ final class WindowsBluetoothPortInfo {
             return Map.of();
         }
         try {
-            Map<String, String> macToFriendlyName = queryBluetoothDeviceNames();
-            return queryPortInfo(macToFriendlyName);
+            JsonNode result = runPowerShellJson(COMBINED_QUERY_SCRIPT);
+            Map<String, String> macToFriendlyName = parseBluetoothDeviceNames(result.path("Devices"));
+            return parsePortInfo(result.path("Ports"), macToFriendlyName);
         } catch (Exception e) {
             LOG.warn("Could not query Windows Bluetooth port info; no filtering/enrichment will be applied.", e);
             return Map.of();
         }
     }
 
-    private static Map<String, String> queryBluetoothDeviceNames() throws IOException, InterruptedException {
-        JsonNode devices = runPowerShellJson(
-                "Get-PnpDevice -Class Bluetooth | Select-Object FriendlyName, InstanceId | ConvertTo-Json");
+    private static Map<String, String> parseBluetoothDeviceNames(JsonNode devices) {
         Map<String, String> macToName = new HashMap<>();
         for (JsonNode device : asArray(devices)) {
             String instanceId = device.path("InstanceId").asText("");
@@ -66,10 +73,7 @@ final class WindowsBluetoothPortInfo {
         return macToName;
     }
 
-    private static Map<String, PortInfo> queryPortInfo(Map<String, String> macToFriendlyName)
-            throws IOException, InterruptedException {
-        JsonNode ports = runPowerShellJson(
-                "Get-CimInstance Win32_SerialPort | Select-Object DeviceID, PNPDeviceID | ConvertTo-Json");
+    private static Map<String, PortInfo> parsePortInfo(JsonNode ports, Map<String, String> macToFriendlyName) {
         Map<String, PortInfo> result = new HashMap<>();
         for (JsonNode port : asArray(ports)) {
             String deviceId = port.path("DeviceID").asText("");
