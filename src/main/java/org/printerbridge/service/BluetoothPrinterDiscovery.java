@@ -3,6 +3,7 @@ package org.printerbridge.service;
 import com.fazecast.jSerialComm.SerialPort;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 import org.printerbridge.printer.Printer;
@@ -14,28 +15,50 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
 
     @Override
     public List<Printer> discover() {
-        SerialPort[] ports = SerialPort.getCommPorts();
-        return Arrays.stream(ports)
-                .map(BluetoothPrinterDiscovery::toPrinter)
+        Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo = WindowsBluetoothPortInfo.query();
+        return Arrays.stream(SerialPort.getCommPorts())
+                .filter(port -> isLikelyRealDevice(port, portInfo))
+                .map(port -> toPrinter(port, portInfo))
                 .toList();
     }
 
     @Override
     public Optional<Printer> findById(String id) {
-        return findPort(id)
-                .map(port -> new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL,
+        Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo = WindowsBluetoothPortInfo.query();
+        return findPort(id, portInfo)
+                .map(port -> new Printer(id, displayName(port, portInfo), PrinterType.BLUETOOTH_THERMAL,
                         testConnectivity(id, port)));
     }
 
     static Optional<SerialPort> findPort(String id) {
+        return findPort(id, WindowsBluetoothPortInfo.query());
+    }
+
+    private static Optional<SerialPort> findPort(String id, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
         return Arrays.stream(SerialPort.getCommPorts())
+                .filter(port -> isLikelyRealDevice(port, portInfo))
                 .filter(port -> PrinterId.derive(port.getSystemPortName()).equals(id))
                 .findFirst();
     }
 
-    private static Printer toPrinter(SerialPort port) {
+    private static boolean isLikelyRealDevice(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
+        // No entry for this port (non-Windows, query failed, or WMI simply doesn't know it) means
+        // we can't tell either way — fail open and keep it rather than risk hiding a real printer.
+        WindowsBluetoothPortInfo.PortInfo info = portInfo.get(port.getSystemPortName());
+        return info == null || info.realRemoteDevice();
+    }
+
+    private static Printer toPrinter(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
         String id = PrinterId.derive(port.getSystemPortName());
-        return new Printer(id, port.getDescriptivePortName(), PrinterType.BLUETOOTH_THERMAL, PrinterStatus.UNKNOWN);
+        return new Printer(id, displayName(port, portInfo), PrinterType.BLUETOOTH_THERMAL, PrinterStatus.UNKNOWN);
+    }
+
+    private static String displayName(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo) {
+        WindowsBluetoothPortInfo.PortInfo info = portInfo.get(port.getSystemPortName());
+        if (info != null && info.friendlyName() != null && !info.friendlyName().isBlank()) {
+            return info.friendlyName();
+        }
+        return port.getDescriptivePortName();
     }
 
     private static PrinterStatus testConnectivity(String id, SerialPort port) {
