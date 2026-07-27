@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.Lock;
+import java.util.function.Function;
 import javax.print.Doc;
 import javax.print.DocFlavor;
 import javax.print.DocPrintJob;
@@ -47,17 +48,40 @@ public final class PrintJobService {
     private static final ExecutorService WRITE_EXECUTOR =
             Executors.newCachedThreadPool(PrintJobService::newDaemonThread);
 
-    private PrintJobService() {
+    private final Function<String, Optional<SerialPort>> bluetoothPortLookup;
+    private final Function<String, Optional<PrintService>> networkServiceLookup;
+
+    /**
+     * Real-hardware constructor: resolves ids against the actual OS-discovered Bluetooth ports and
+     * network print services (cf. {@link BluetoothPrinterDiscovery}/{@link NetworkPrinterDiscovery}).
+     */
+    public PrintJobService() {
+        this(BluetoothPrinterDiscovery::findPort, NetworkPrinterDiscovery::findService);
     }
 
-    public static void print(String printerId, PrintContentType contentType, byte[] payload) {
-        Optional<SerialPort> port = BluetoothPrinterDiscovery.findPort(printerId);
+    /**
+     * Injectable constructor — lets callers (tests, mainly) resolve printer ids without touching
+     * real hardware or the OS. Real Windows/Linux Bluetooth port lookup goes through WMI/`rfcomm`,
+     * an external-process call that's consistently ~7s on real hardware (measured — not a code
+     * bug, the WMI enumeration itself is that slow on at least one dev machine) — every automated
+     * test that used to resolve a real id, including "unknown id" error-path tests that don't care
+     * about discovery at all, paid that cost. This constructor is the fix: it lets those tests
+     * supply id -&gt; Optional.empty() (or a specific fake id) directly, with no discovery latency.
+     */
+    public PrintJobService(Function<String, Optional<SerialPort>> bluetoothPortLookup,
+            Function<String, Optional<PrintService>> networkServiceLookup) {
+        this.bluetoothPortLookup = bluetoothPortLookup;
+        this.networkServiceLookup = networkServiceLookup;
+    }
+
+    public void print(String printerId, PrintContentType contentType, byte[] payload) {
+        Optional<SerialPort> port = bluetoothPortLookup.apply(printerId);
         if (port.isPresent()) {
             printViaBluetooth(printerId, port.get(), contentType, payload);
             return;
         }
 
-        Optional<PrintService> service = NetworkPrinterDiscovery.findService(printerId);
+        Optional<PrintService> service = networkServiceLookup.apply(printerId);
         if (service.isPresent()) {
             printViaNetwork(service.get(), contentType, payload);
             return;
@@ -72,14 +96,14 @@ public final class PrintJobService {
      * end to end — not just that its port/service can be opened, which we've seen isn't enough
      * (cf. CLAUDE.md): a dead Bluetooth link can still report as reachable.
      */
-    public static void testPrint(String printerId) {
-        Optional<SerialPort> port = BluetoothPrinterDiscovery.findPort(printerId);
+    public void testPrint(String printerId) {
+        Optional<SerialPort> port = bluetoothPortLookup.apply(printerId);
         if (port.isPresent()) {
             printViaBluetooth(printerId, port.get(), PrintContentType.ESC_POS, TestPrintPayloads.escPos(printerId));
             return;
         }
 
-        Optional<PrintService> service = NetworkPrinterDiscovery.findService(printerId);
+        Optional<PrintService> service = networkServiceLookup.apply(printerId);
         if (service.isPresent()) {
             printViaNetwork(service.get(), PrintContentType.PDF, TestPrintPayloads.pdf(printerId));
             return;

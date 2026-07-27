@@ -6,7 +6,7 @@
 
     <groupId>org.printerbridge</groupId>
     <artifactId>printerbridge</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -18,6 +18,11 @@
         <logback.version>1.5.38</logback.version>
         <junit.version>6.1.2</junit.version>
         <pdfbox.version>3.0.8</pdfbox.version>
+        <!-- Tests tagged "hardware" hit real OS/Bluetooth discovery (WMI on Windows, rfcomm/bluetoothctl
+             on Linux) - measured at ~7.5s per call on real hardware (the WMI enumeration itself, not a
+             code issue), which made `mvn test` take minutes and made unrelated tests time out. Excluded
+             from the default `mvn test` run; opt in with `mvn test -Dtest.excludedGroups=`. -->
+        <test.excludedGroups>hardware</test.excludedGroups>
     </properties>
 
     <dependencies>
@@ -81,6 +86,7 @@
                 <configuration>
                     <!-- jSerialComm charge une lib native (JNI) ; évite le warning JEP 472 -->
                     <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                    <excludedGroups>${test.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>
             <!-- Jar exécutable (Main-Class) ; utilisable seul via `java -jar`, jpackage la traite comme main-jar -->

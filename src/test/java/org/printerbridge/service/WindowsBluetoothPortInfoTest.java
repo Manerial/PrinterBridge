@@ -7,13 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.util.Map;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 class WindowsBluetoothPortInfoTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    // Real WMI call — ~7.5s measured on Windows (the enumeration itself, not a code bug). Tagged
+    // "hardware", excluded from the default `mvn test` run (pom.xml, test.excludedGroups).
     @Test
+    @Tag("hardware")
     void queryNeverThrowsAndReturnsAUsableMap() {
         Map<String, WindowsBluetoothPortInfo.PortInfo> result = assertDoesNotThrow(WindowsBluetoothPortInfo::query);
         assertNotNull(result);

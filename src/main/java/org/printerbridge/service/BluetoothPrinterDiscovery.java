@@ -43,7 +43,7 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
             Map<String, String> linuxMacs) {
         return Arrays.stream(SerialPort.getCommPorts())
                 .filter(port -> isLikelyRealDevice(port, portInfo))
-                .filter(port -> PrinterId.derive(physicalKey(port, portInfo, linuxMacs)).equals(id))
+                .filter(port -> PrinterId.derive(physicalKey(port.getSystemPortName(), portInfo, linuxMacs)).equals(id))
                 .findFirst();
     }
 
@@ -61,7 +61,7 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
 
     private static Printer toPrinter(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
             Map<String, String> linuxMacs, Map<String, String> linuxFriendlyNames) {
-        String id = PrinterId.derive(physicalKey(port, portInfo, linuxMacs));
+        String id = PrinterId.derive(physicalKey(port.getSystemPortName(), portInfo, linuxMacs));
         return new Printer(id, displayName(port, portInfo, linuxFriendlyNames), PrinterType.BLUETOOTH_THERMAL,
                 PrinterStatus.UNKNOWN);
     }
@@ -74,18 +74,22 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
      * device, or a non-Windows/non-Linux OS). MAC formatting differs by source (Windows: 12 hex
      * chars, no separator; Linux: colon-separated) — normalized here so the same physical address
      * always hashes to the same id regardless of which OS resolved it.
+     * <p>Takes the port name as a plain String rather than a {@link SerialPort} — it's all this needs,
+     * and {@code SerialPort.getCommPort(String)} validates its argument against the current OS's
+     * naming convention (e.g. rejects "COM7" outright on Linux/macOS), which made this untestable
+     * with a fabricated port name on any OS other than the one a given test string happened to match.
      */
-    static String physicalKey(SerialPort port, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
+    static String physicalKey(String systemPortName, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
             Map<String, String> linuxMacs) {
-        WindowsBluetoothPortInfo.PortInfo info = portInfo.get(port.getSystemPortName());
+        WindowsBluetoothPortInfo.PortInfo info = portInfo.get(systemPortName);
         if (info != null && info.mac() != null) {
             return normalizeMac(info.mac());
         }
-        String linuxMac = linuxMacs.get(port.getSystemPortName());
+        String linuxMac = linuxMacs.get(systemPortName);
         if (linuxMac != null) {
             return normalizeMac(linuxMac);
         }
-        return port.getSystemPortName();
+        return systemPortName;
     }
 
     private static String normalizeMac(String mac) {

@@ -30,12 +30,21 @@ public final class ApiServer {
     private static final long MAX_PRINT_PAYLOAD_BYTES = 25L * 1024 * 1024;
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Map<WsContext, PrintControlMessage> PENDING_CONTROL = new ConcurrentHashMap<>();
-    private static final PrinterRegistry REGISTRY = new PrinterRegistry();
 
     private ApiServer() {
     }
 
     public static Javalin start(int port) {
+        return start(port, new PrinterRegistry(), new PrintJobService());
+    }
+
+    /**
+     * Real entry point behind the public {@link #start(int)} — takes the registry/print-job
+     * dependencies as parameters instead of hardcoding the real, OS-backed implementations, so
+     * tests can inject fakes. Package-private: the real defaults above are the only production
+     * wiring, this overload exists for {@code ApiServerTest}.
+     */
+    static Javalin start(int port, PrinterRegistry registry, PrintJobService printJobService) {
         return Javalin.create(config -> {
             config.jetty.host = BIND_HOST;
             config.jetty.port = port;
@@ -58,15 +67,15 @@ public final class ApiServer {
             // printer inventory.
             config.routes.before(ctx -> enforceSameOrigin(ctx, port));
             config.routes.wsBeforeUpgrade(ctx -> enforceSameOrigin(ctx, port));
-            config.routes.get("/printers", ctx -> ctx.json(REGISTRY.discoverAll()));
+            config.routes.get("/printers", ctx -> ctx.json(registry.discoverAll()));
             config.routes.get("/printers/{id}/status", ctx -> {
                 String id = ctx.pathParam("id");
-                ctx.json(REGISTRY.findStatus(id)
+                ctx.json(registry.findStatus(id)
                         .orElseThrow(() -> new NotFoundResponse("Unknown printer id: " + id)));
             });
             config.routes.post("/printers/{id}/test-print", ctx -> {
                 try {
-                    PrintJobService.testPrint(ctx.pathParam("id"));
+                    printJobService.testPrint(ctx.pathParam("id"));
                     ctx.json(PrintResult.ok());
                 } catch (UnknownPrinterException e) {
                     // Consistent with GET /printers/{id}/status: an unknown id is a 404 (the
@@ -87,7 +96,7 @@ public final class ApiServer {
             });
             config.routes.ws("/printers/{id}/print", ws -> {
                 ws.onMessage(ApiServer::onControlMessage);
-                ws.onBinaryMessage(ApiServer::onPayload);
+                ws.onBinaryMessage(ctx -> onPayload(ctx, printJobService));
                 ws.onClose(PENDING_CONTROL::remove);
                 ws.onError(PENDING_CONTROL::remove);
             });
@@ -115,7 +124,7 @@ public final class ApiServer {
         }
     }
 
-    private static void onPayload(WsBinaryMessageContext ctx) {
+    private static void onPayload(WsBinaryMessageContext ctx, PrintJobService printJobService) {
         PrintControlMessage control = PENDING_CONTROL.remove(ctx);
         if (control == null) {
             sendResult(ctx, PrintResult.error("Expected a JSON control message before the binary payload"));
@@ -134,7 +143,7 @@ public final class ApiServer {
         }
 
         try {
-            PrintJobService.print(ctx.pathParam("id"), control.contentType(), payload);
+            printJobService.print(ctx.pathParam("id"), control.contentType(), payload);
             sendResult(ctx, PrintResult.ok());
         } catch (PrintJobException e) {
             sendResult(ctx, PrintResult.error(e.getMessage()));

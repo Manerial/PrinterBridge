@@ -15,28 +15,43 @@ import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.PrintContentType;
 import org.printerbridge.printer.Printer;
+import org.printerbridge.printer.PrinterStatus;
 import org.printerbridge.printer.PrinterType;
+import org.printerbridge.service.PrinterDiscovery;
 import org.printerbridge.service.PrinterRegistry;
+import org.printerbridge.service.PrintJobService;
 
 class ApiServerTest {
 
+    private static final Printer KNOWN_PRINTER =
+            new Printer("known-id", "Known Printer", PrinterType.BLUETOOTH_THERMAL, PrinterStatus.ONLINE);
+
     private final ObjectMapper mapper = new ObjectMapper();
-    private final PrinterRegistry registry = new PrinterRegistry();
 
     private Javalin app;
 
     @BeforeEach
     void startServer() {
-        app = ApiServer.start(0);
+        // Fake registry/print-job-service by default. The real ones go through OS/WMI discovery,
+        // measured at ~7.5s per call on real hardware (WindowsBluetoothPortInfo, not a code bug —
+        // the WMI enumeration itself is that slow here) — that used to make every test in this
+        // class pay that cost even for ones that only care about an unknown id or a malformed
+        // request, and made the WS tests below time out against their 5s wait. See CLAUDE.md
+        // (correctif audit) and the one "hardware"-tagged test at the bottom for the case that
+        // still needs the real thing.
+        app = ApiServer.start(0, new PrinterRegistry(List.of(new FakeDiscovery(List.of(KNOWN_PRINTER)))),
+                new PrintJobService(id -> Optional.empty(), id -> Optional.empty()));
     }
 
     @AfterEach
@@ -74,7 +89,7 @@ class ApiServerTest {
         assertEquals(200, response.statusCode());
         List<Printer> actual = mapper.readValue(response.body(), new TypeReference<List<Printer>>() {
         });
-        assertEquals(registry.discoverAll(), actual);
+        assertEquals(List.of(KNOWN_PRINTER), actual);
     }
 
     @Test
@@ -92,16 +107,9 @@ class ApiServerTest {
 
     @Test
     void statusReturns200ForAKnownPrinter() throws IOException, InterruptedException {
-        List<Printer> printers = registry.discoverAll();
-        // Skip rather than silently pass: without a real printer discovered on the machine running
-        // the test (the case on a bare CI runner), there'd be nothing left to assert — an
-        // "assumeTrue" abort shows up as SKIPPED in the test report, unlike a bare early return.
-        Assumptions.assumeTrue(!printers.isEmpty(), "No printer discovered on this machine — skipping");
-        Printer expected = printers.get(0);
-
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://127.0.0.1:" + app.port() + "/printers/" + expected.id() + "/status"))
+                .uri(URI.create("http://127.0.0.1:" + app.port() + "/printers/" + KNOWN_PRINTER.id() + "/status"))
                 .GET()
                 .build();
 
@@ -109,38 +117,49 @@ class ApiServerTest {
 
         assertEquals(200, response.statusCode());
         Printer actual = mapper.readValue(response.body(), Printer.class);
-        assertEquals(expected.id(), actual.id());
-        assertEquals(expected.type(), actual.type());
+        assertEquals(KNOWN_PRINTER.id(), actual.id());
+        assertEquals(KNOWN_PRINTER.type(), actual.type());
     }
 
     @Test
     void printReturnsErrorForUnknownPrinterId() throws Exception {
         byte[] payload = {1, 2, 3};
-        String response = sendPrintRequest("unknown", PrintContentType.ESC_POS, payload.length, payload);
+        String response = sendPrintRequest(app.port(), "unknown", PrintContentType.ESC_POS, payload.length, payload);
 
         assertTrue(response.contains("Unknown printer id"));
     }
 
+    // Uses real discovery/print-job-service (not the fake-backed app above): the mismatch check
+    // itself is already covered hardware-independently by PrintJobServiceTest.requireContentType*;
+    // this one is a genuine end-to-end sanity check against a real network printer, hence tagged
+    // and excluded from the default `mvn test` run like the rest of the hardware-dependent tests
+    // (pom.xml, test.excludedGroups).
     @Test
+    @Tag("hardware")
     void printRejectsMismatchedContentTypeForNetworkPrinter() throws Exception {
-        Printer network = registry.discoverAll().stream()
-                .filter(printer -> printer.type() == PrinterType.NETWORK)
-                .findFirst()
-                .orElse(null);
-        // Same reasoning as statusReturns200ForAKnownPrinter above: skip visibly rather than pass
-        // silently when no network printer is installed on the machine running the test.
-        Assumptions.assumeTrue(network != null, "No network printer discovered on this machine — skipping");
+        Javalin realApp = ApiServer.start(0);
+        try {
+            Printer network = new PrinterRegistry().discoverAll().stream()
+                    .filter(printer -> printer.type() == PrinterType.NETWORK)
+                    .findFirst()
+                    .orElse(null);
+            Assumptions.assumeTrue(network != null, "No network printer discovered on this machine — skipping");
 
-        byte[] payload = {1, 2, 3};
-        String response = sendPrintRequest(network.id(), PrintContentType.ESC_POS, payload.length, payload);
+            byte[] payload = {1, 2, 3};
+            String response =
+                    sendPrintRequest(realApp.port(), network.id(), PrintContentType.ESC_POS, payload.length, payload);
 
-        assertTrue(response.contains("only accept PDF"));
+            assertTrue(response.contains("only accept PDF"));
+        } finally {
+            realApp.stop();
+        }
     }
 
     @Test
     void printRejectsDeclaredSizeMismatch() throws Exception {
         byte[] payload = {1, 2, 3};
-        String response = sendPrintRequest("unknown", PrintContentType.PDF, payload.length + 1, payload);
+        String response =
+                sendPrintRequest(app.port(), "unknown", PrintContentType.PDF, payload.length + 1, payload);
 
         assertTrue(response.contains("does not match"));
     }
@@ -152,7 +171,7 @@ class ApiServerTest {
         byte[] payload = new byte[200_000];
         Arrays.fill(payload, (byte) 1);
 
-        String response = sendPrintRequest("unknown", PrintContentType.PDF, payload.length, payload);
+        String response = sendPrintRequest(app.port(), "unknown", PrintContentType.PDF, payload.length, payload);
 
         assertTrue(response.contains("Unknown printer id"));
     }
@@ -189,12 +208,12 @@ class ApiServerTest {
     // Deliberately not tested here: a successful test-print against a real, discovered printer —
     // it would actually attempt to print (cf. PrintJobServiceTest). Validate manually instead.
 
-    private String sendPrintRequest(String printerId, PrintContentType contentType, int declaredSize, byte[] payload)
-            throws Exception {
+    private String sendPrintRequest(int port, String printerId, PrintContentType contentType, int declaredSize,
+            byte[] payload) throws Exception {
         CompletableFuture<String> firstMessage = new CompletableFuture<>();
         WebSocket ws = HttpClient.newHttpClient()
                 .newWebSocketBuilder()
-                .buildAsync(URI.create("ws://127.0.0.1:" + app.port() + "/printers/" + printerId + "/print"),
+                .buildAsync(URI.create("ws://127.0.0.1:" + port + "/printers/" + printerId + "/print"),
                         textCollectingListener(firstMessage))
                 .get(5, TimeUnit.SECONDS);
 
@@ -202,7 +221,10 @@ class ApiServerTest {
         ws.sendText(controlJson, true).get(5, TimeUnit.SECONDS);
         ws.sendBinary(ByteBuffer.wrap(payload), true).get(5, TimeUnit.SECONDS);
 
-        return firstMessage.get(5, TimeUnit.SECONDS);
+        // The fake-backed tests above resolve near-instantly, so this ceiling only ever matters for
+        // the "hardware"-tagged test, whose real discovery call is itself ~7.5s on real hardware
+        // (measured, see CLAUDE.md) — comfortable margin above that, not a fixed wait.
+        return firstMessage.get(20, TimeUnit.SECONDS);
     }
 
     private static WebSocket.Listener textCollectingListener(CompletableFuture<String> firstMessage) {
@@ -219,5 +241,23 @@ class ApiServerTest {
                 return null;
             }
         };
+    }
+
+    private static final class FakeDiscovery implements PrinterDiscovery {
+        private final List<Printer> printers;
+
+        FakeDiscovery(List<Printer> printers) {
+            this.printers = printers;
+        }
+
+        @Override
+        public List<Printer> discover() {
+            return printers;
+        }
+
+        @Override
+        public Optional<Printer> findById(String id) {
+            return printers.stream().filter(printer -> printer.id().equals(id)).findFirst();
+        }
     }
 }

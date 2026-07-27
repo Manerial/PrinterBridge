@@ -4,15 +4,24 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Optional;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.PrintContentType;
 
 class PrintJobServiceTest {
 
+    // Fake lookups instead of PrintJobService's real constructor: print()/testPrint() previously
+    // always went through real Bluetooth (WMI) discovery first, even for an id these tests already
+    // know isn't real — on Windows that's a ~7.5s external call per test (measured, not a code bug,
+    // see WindowsBluetoothPortInfo), for a test that has nothing to do with hardware. This is what
+    // the injectable constructor (correctif audit) exists for.
+    private final PrintJobService printJobService = new PrintJobService(id -> Optional.empty(), id -> Optional.empty());
+
     @Test
     void printRejectsAnUnknownPrinterId() {
         PrintJobException exception = assertThrows(PrintJobException.class,
-                () -> PrintJobService.print("unknown", PrintContentType.ESC_POS, new byte[]{1}));
+                () -> printJobService.print("unknown", PrintContentType.ESC_POS, new byte[]{1}));
 
         assertTrue(exception.getMessage().contains("Unknown printer id"));
     }
@@ -20,7 +29,19 @@ class PrintJobServiceTest {
     @Test
     void testPrintRejectsAnUnknownPrinterId() {
         PrintJobException exception = assertThrows(PrintJobException.class,
-                () -> PrintJobService.testPrint("unknown"));
+                () -> printJobService.testPrint("unknown"));
+
+        assertTrue(exception.getMessage().contains("Unknown printer id"));
+    }
+
+    // Sanity check that PrintJobService's real (no-arg) constructor is actually wired to the real
+    // BluetoothPrinterDiscovery/NetworkPrinterDiscovery, not just that the fake-backed path above
+    // works — hits real hardware discovery, so tagged "hardware" like the rest (pom.xml).
+    @Test
+    @Tag("hardware")
+    void printOnTheRealConstructorRejectsAnUnknownPrinterId() {
+        PrintJobException exception = assertThrows(PrintJobException.class,
+                () -> new PrintJobService().print("unknown", PrintContentType.ESC_POS, new byte[]{1}));
 
         assertTrue(exception.getMessage().contains("Unknown printer id"));
     }
