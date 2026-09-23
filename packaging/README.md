@@ -21,3 +21,7 @@ tout seul. On l'utilise pour deux scripts que dpkg exécute à l'installation/d�
 - **`postrm`** — supprime cette unité à la désinstallation.
 
 Procédure de test détaillée (non validée sur machine réelle) : voir `linux/TESTING.md`.
+
+Premier retour utilisateur réel (v1.0.1) : `systemctl --user start` échouait avec `Failed to
+connect to bus` sur une install sans `dbus-user-session` — voir la section Dépannage de
+`linux/TESTING.md` et le correctif `--linux-package-deps` dans `jpackage-linux.sh`.

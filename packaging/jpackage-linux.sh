@@ -43,9 +43,14 @@ jpackage \
     --description "Service local d'impression pour PluriBourse" \
     --linux-menu-group "Utilities" \
     --linux-shortcut \
-    --linux-deb-maintainer "Manerial <herment.julien@gmail.com>"
+    --linux-deb-maintainer "Manerial <herment.julien@gmail.com>" \
+    --linux-package-deps "dbus-user-session"
     #
     # --install-dir fixe le chemin d'installation à /opt/printerbridge, pour que le binaire
     # attendu par packaging/linux/resources/postinst (/opt/printerbridge/bin/PrinterBridge)
     # soit prévisible plutôt que de dépendre du comportement par défaut de jpackage.
     # --resource-dir injecte notre postinst/postrm (unité systemd --user), cf. packaging/linux/TESTING.md.
+    # --linux-package-deps "dbus-user-session" : `systemctl --user` échoue avec
+    # "Failed to connect to bus" sur une machine où ce paquet n'est pas déjà présent
+    # (fréquent sur une install Debian/Ubuntu minimale, ex. serveur sans environnement
+    # de bureau) — constaté par un retour utilisateur réel (v1.0.1), cf. CLAUDE.md.

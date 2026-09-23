@@ -116,6 +116,35 @@ ls /usr/lib/systemd/user/printerbridge.service   # doit ne plus exister
 l'arrête pas (il tourne en root pendant `dpkg`, sans accès à ta session `--user`). Arrête-le à la
 main avant (`systemctl --user stop printerbridge`) si besoin.
 
+## Dépannage — `Failed to connect to bus: Aucun support trouvé`
+
+Constaté par un retour utilisateur réel (v1.0.1, install `.deb` sur une vraie machine) : `systemctl
+--user start printerbridge` échoue avec ce message, ou une variante ("No such file or directory"/
+"No medium found" en anglais). Ça ne veut **pas** dire que l'unité est introuvable — ça veut dire
+que systemd n'arrive pas à joindre le *bus D-Bus de session utilisateur* du tout. Piste de
+diagnostic :
+
+```sh
+systemctl --user status        # sans nom d'unité : si ça échoue pareil, le problème est le bus, pas printerbridge
+loginctl show-user "$(whoami)" --property=Linger
+dpkg -l dbus-user-session      # présent ?
+```
+
+Causes les plus courantes :
+- **`dbus-user-session` absent** — fréquent sur une install Debian/Ubuntu minimale (ex. serveur
+  sans environnement de bureau). Corrigé depuis pour les nouvelles installs : le `.deb` déclare
+  maintenant cette dépendance (`--linux-package-deps` dans `packaging/jpackage-linux.sh`), `apt`
+  l'installe automatiquement. Pour un `.deb` déjà installé avant ce correctif :
+  `sudo apt install dbus-user-session`.
+- **Pas de session de login complète** — connecté en SSH sans session PAM complète, ou passé
+  root→utilisateur via `su`/`sudo -i` plutôt qu'un vrai login. Passer par une vraie session
+  (console ou bureau), ou à défaut `loginctl enable-linger <user>` + `export
+  XDG_RUNTIME_DIR=/run/user/$(id -u)` avant la commande.
+
+Et séparément — l'erreur `Unit printerbridge.service not found` (sans le message de bus) veut dire
+que `--user` a été omis : sans lui, `systemctl` interroge le *system manager*, alors que l'unité
+n'est installée que dans `/usr/lib/systemd/user/` (scope utilisateur).
+
 ## Ce qui manque encore, volontairement pas fait ici
 
 Aucun raccourci (icône bureau / menu applications) ne passe encore par `systemctl --user start` —
