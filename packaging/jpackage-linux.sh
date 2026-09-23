@@ -33,7 +33,7 @@ jpackage \
     --dest target/dist \
     --name PrinterBridge \
     --linux-package-name printerbridge \
-    --install-dir /opt/printerbridge \
+    --install-dir /opt \
     --resource-dir packaging/linux/resources \
     --main-jar "printerbridge-$VERSION.jar" \
     --main-class org.printerbridge.Main \
@@ -46,9 +46,12 @@ jpackage \
     --linux-deb-maintainer "Manerial <herment.julien@gmail.com>" \
     --linux-package-deps "dbus-user-session"
     #
-    # --install-dir fixe le chemin d'installation à /opt/printerbridge, pour que le binaire
-    # attendu par packaging/linux/resources/postinst (/opt/printerbridge/bin/PrinterBridge)
-    # soit prévisible plutôt que de dépendre du comportement par défaut de jpackage.
+    # --install-dir /opt (pas /opt/printerbridge) : sur Linux, jpackage ajoute lui-même un
+    # sous-dossier nommé d'après --linux-package-name sous --install-dir. Avec
+    # --install-dir /opt/printerbridge, ça donnait /opt/printerbridge/printerbridge/bin/PrinterBridge
+    # (double dossier) au lieu du /opt/printerbridge/bin/PrinterBridge attendu par
+    # packaging/linux/resources/postinst (ExecStart=) — confirmé par un retour utilisateur réel
+    # (v1.1.0, cf. CLAUDE.md), pas seulement une supposition de doc.
     # --resource-dir injecte notre postinst/postrm (unité systemd --user), cf. packaging/linux/TESTING.md.
     # --linux-package-deps "dbus-user-session" : `systemctl --user` échoue avec
     # "Failed to connect to bus" sur une machine où ce paquet n'est pas déjà présent
