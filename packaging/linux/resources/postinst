@@ -16,6 +16,16 @@ Type=simple
 ExecStart=/opt/printerbridge/bin/PrinterBridge
 Restart=on-failure
 RestartSec=5
+# The shutdown hook (Main.java) runs app.stop() on SIGTERM but never calls System.exit(0) itself
+# (unsafe from inside a hook already running during JVM shutdown — Runtime.exit blocks if called
+# while shutdown is in progress). So a clean `systemctl --user stop` still exits the JVM with 143
+# (128+SIGTERM, standard Unix convention), which systemd would otherwise treat as a failure.
+# Confirmed on real hardware (23 September 2026, WSL2/Ubuntu): `systemctl --user status` showed
+# "failed (Result: exit-code)" after a deliberate stop, even though Jetty/Javalin had shut down
+# cleanly and no restart was triggered (systemd already suppresses Restart= for an explicitly
+# requested stop, regardless of exit status). SuccessExitStatus tells systemd this code is expected
+# here, so the unit lands on "inactive (dead)" instead.
+SuccessExitStatus=143
 
 [Install]
 WantedBy=graphical-session.target

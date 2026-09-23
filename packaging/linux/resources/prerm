@@ -1,0 +1,28 @@
+#!/bin/sh
+# Overrides jpackage's default prerm (see packaging/README.md).
+# jpackage's own generated prerm runs this same `xdg-desktop-menu uninstall` under `set -e` with no
+# tolerance for failure. On a machine without a writable system menu directory (confirmed on real
+# hardware: WSL2/Ubuntu, no desktop environment), `xdg-desktop-menu` exits non-zero, `set -e` aborts
+# the whole script, and dpkg treats that as a fatal maintainer-script failure — `apt remove
+# printerbridge` fails outright ("too many errors, stopping"), leaving the package stuck
+# half-removed, the systemd unit still in place, and the service still running. The desktop menu
+# entry is a cosmetic nice-to-have, not something worth blocking an uninstall over — `|| true`
+# tolerates that failure while still attempting the cleanup on a normal desktop machine (the real
+# target, cf. CLAUDE.md), where it's expected to succeed.
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        xdg-desktop-menu uninstall /opt/printerbridge/lib/printerbridge-PrinterBridge.desktop || true
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
