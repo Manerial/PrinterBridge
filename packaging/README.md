@@ -5,7 +5,7 @@ Trois scripts, un par OS cible. Tous partent de `target/jpackage-input` (produit
 
 | Script | Type | Cible | Statut |
 |---|---|---|---|
-| `jpackage-linux.sh` | `.deb` | Debian/Ubuntu x86_64 — **cible principale** (aussi valable pour arm64/Raspberry Pi si exécuté sur cette architecture) | Non testé (pas de machine Linux disponible à l'écriture) |
+| `jpackage-linux.sh` | `.deb` | Debian/Ubuntu x86_64 — **cible principale** (aussi valable pour arm64/Raspberry Pi si exécuté sur cette architecture) | Lancement validé de bout en bout (23 septembre 2026, WSL2/Ubuntu + systemd) — matériel Bluetooth/imprimante réel toujours non testé |
 | `jpackage-windows.ps1` | `.msi` | Windows — secondaire | Testé jusqu'au point de blocage WiX Toolset (absent sur cette machine de dev) |
 | `jpackage-macos.sh` | `.pkg` | Mac — secondaire | Non testé (pas de Mac disponible) |
 
@@ -20,8 +20,18 @@ tout seul. On l'utilise pour deux scripts que dpkg exécute à l'installation/d�
   complète et le pourquoi (tension entre lancement manuel et reprise automatique sur crash, cf. CLAUDE.md).
 - **`postrm`** — supprime cette unité à la désinstallation.
 
-Procédure de test détaillée (non validée sur machine réelle) : voir `linux/TESTING.md`.
+Procédure de test détaillée : voir `linux/TESTING.md`.
 
-Premier retour utilisateur réel (v1.0.1) : `systemctl --user start` échouait avec `Failed to
-connect to bus` sur une install sans `dbus-user-session` — voir la section Dépannage de
-`linux/TESTING.md` et le correctif `--linux-package-deps` dans `jpackage-linux.sh`.
+Retours utilisateur réels ayant fait évoluer ce script (voir CLAUDE.md pour le détail) :
+- **v1.0.1** — `systemctl --user start` échouait avec `Failed to connect to bus` sur une install
+  sans `dbus-user-session` ; corrigé via `--linux-package-deps "dbus-user-session"`.
+- **v1.1.0** — `--install-dir /opt/printerbridge` produisait un dossier imbriqué
+  (`/opt/printerbridge/printerbridge/bin/...`) au lieu du chemin attendu par `postinst`
+  (`ExecStart=`) ; corrigé en `--install-dir /opt`. `dpkg -i` échouait aussi sur `xdg-utils`
+  manquant (ajouté par jpackage à cause de `--linux-shortcut`) — la procédure recommande
+  maintenant `apt install ./printerbridge_*.deb`, qui résout les dépendances tout seul (voir
+  section Dépannage de `linux/TESTING.md`).
+- **23 septembre 2026** — lancement validé de bout en bout (build, install, `systemctl --user
+  start`, `GET /printers` répond) en environnement WSL2/Ubuntu avec systemd activé. Toujours pas
+  testé : matériel Bluetooth/imprimante réel, et l'hypothèse `BIND_HOST`/Docker natif (cf.
+  CLAUDE.md).

@@ -39,8 +39,15 @@ Si le chemin affiché est différent, corrige `ExecStart=` dans
 ## 3. Installer
 
 ```sh
-sudo dpkg -i target/dist/printerbridge_*.deb
+sudo apt install -y ./target/dist/printerbridge_*.deb
 ```
+
+`apt install ./...` plutôt que `dpkg -i` : `dpkg -i` n'installe jamais les dépendances manquantes tout seul
+(`dbus-user-session`, et `xdg-utils` ajouté automatiquement par jpackage à cause de `--linux-shortcut`) —
+constaté en pratique (retour utilisateur réel, v1.1.0) sur une image sans environnement de bureau (WSL),
+où `xdg-utils` n'est pas déjà tiré par autre chose. `apt install` les résout et les installe lui-même. Si
+tu utilises quand même `dpkg -i` et qu'il se plaint d'une dépendance manquante : `sudo apt install -y
+<paquet-manquant> && sudo dpkg --configure -a`.
 
 ## 4. Vérifier que l'unité systemd est là, mais pas active
 
