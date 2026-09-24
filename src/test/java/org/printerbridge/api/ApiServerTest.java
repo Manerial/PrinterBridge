@@ -213,17 +213,20 @@ class ApiServerTest {
     void listensOnExtraBindHostsInAdditionToLoopback() throws IOException, InterruptedException {
         // Real end-to-end check (not just parseExtraBindHosts below) that Javalin/Jetty actually
         // opens a second connector — confirmed by hand against a real Docker bridge address on
-        // Linux (CLAUDE.md), but exercised here with a loopback alias so it runs unattended on any
-        // OS/CI runner: 127.0.0.0/8 is all loopback on Windows, Linux and macOS alike, no extra
-        // network setup needed.
+        // Linux (CLAUDE.md), but exercised here with the IPv6 loopback so it runs unattended on any
+        // OS/CI runner. A second IPv4 loopback alias (e.g. 127.0.0.2) does NOT work for this: Linux
+        // and Windows treat the whole 127.0.0.0/8 range as loopback out of the box, but macOS only
+        // pre-configures 127.0.0.1 on lo0 — binding to another IPv4 loopback address there requires
+        // an explicit `ifconfig lo0 alias` first (confirmed by a real macOS CI failure: "Can't assign
+        // requested address"). ::1 is pre-configured everywhere without any extra setup.
         Javalin multiHostApp = ApiServer.start(0, new PrinterRegistry(List.of(new FakeDiscovery(List.of(KNOWN_PRINTER)))),
-                new PrintJobService(id -> Optional.empty(), id -> Optional.empty()), List.of("127.0.0.2"));
+                new PrintJobService(id -> Optional.empty(), id -> Optional.empty()), List.of("::1"));
         try {
-            int extraPort = extraConnectorPort(multiHostApp, "127.0.0.2");
+            int extraPort = extraConnectorPort(multiHostApp, "::1");
 
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://127.0.0.2:" + extraPort + "/printers"))
+                    .uri(URI.create("http://[::1]:" + extraPort + "/printers"))
                     .GET()
                     .build();
 
