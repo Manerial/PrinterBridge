@@ -78,3 +78,35 @@ jobs:
         with:
           name: printerbridge-macos-pkg
           path: target/dist/*.pkg
+
+  # Sans ce job, les .deb/.msi/.pkg n'existent que comme artefacts de run de workflow
+  # (actions/upload-artifact) : leur téléchargement exige d'être connecté à GitHub — repéré via un
+  # vrai retour utilisateur (v1.3.0), pas une supposition (cf. CLAUDE.md). Une vraie Release rend les
+  # 3 installeurs publics, sans connexion, et donne une URL stable ("dernière version") pour un
+  # script d'installation automatisé côté PluriBourse.
+  release:
+    needs: [linux, windows, macos]
+    # Seulement sur un vrai tag de version — un déclenchement manuel (workflow_dispatch) sans tag
+    # associé n'a rien de cohérent à quoi rattacher une Release ; les jobs ci-dessus produisent quand
+    # même leurs artefacts de run dans ce cas, pour tester une build sans publier quoi que ce soit.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      # Le reste du workflow n'a besoin que de lire le repo (checkout) ; seul ce job élève le droit
+      # nécessaire pour créer une Release, plutôt que d'accorder l'écriture à tout le workflow.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            dist/printerbridge-linux-deb/*.deb \
+            dist/printerbridge-windows-msi/*.msi \
+            dist/printerbridge-macos-pkg/*.pkg \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
