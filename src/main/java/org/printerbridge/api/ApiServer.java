@@ -11,8 +11,13 @@ import io.javalin.websocket.WsBinaryMessageContext;
 import io.javalin.websocket.WsContext;
 import io.javalin.websocket.WsMessageContext;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.server.ServerConnector;
 import org.printerbridge.service.PrintJobException;
 import org.printerbridge.service.PrintJobService;
 import org.printerbridge.service.PrinterRegistry;
@@ -24,6 +29,12 @@ public final class ApiServer {
 
     private static final Logger LOG = LoggerFactory.getLogger(ApiServer.class);
     private static final String BIND_HOST = "127.0.0.1";
+    // Generic escape hatch, no knowledge of Docker or any other specific caller here (see
+    // CLAUDE.md): a comma-separated list of extra addresses to listen on besides BIND_HOST. Left
+    // unset, behavior is identical to before. Whoever needs PrinterBridge reachable from outside
+    // the host's own loopback (e.g. a container on a different network namespace) is responsible
+    // for figuring out the right address and setting this — not this codebase's concern.
+    private static final String EXTRA_BIND_ADDRESSES_ENV = "PRINTERBRIDGE_EXTRA_BIND_ADDRESSES";
     public static final String TEST_PAGE_PATH = "/test.html";
     // Jetty's default WS message cap (64 KB) is well under a real A4 label PDF; raised generously
     // here since the only caller is the trusted, loopback-only PluriBourse backend.
@@ -45,9 +56,23 @@ public final class ApiServer {
      * wiring, this overload exists for {@code ApiServerTest}.
      */
     static Javalin start(int port, PrinterRegistry registry, PrintJobService printJobService) {
+        return start(port, registry, printJobService, parseExtraBindHosts(System.getenv(EXTRA_BIND_ADDRESSES_ENV)));
+    }
+
+    /**
+     * Takes the extra bind addresses as a parameter too (instead of always reading the environment
+     * variable directly), so {@code ApiServerTest} can verify the multi-address binding itself
+     * without having to fake an environment variable.
+     */
+    static Javalin start(int port, PrinterRegistry registry, PrintJobService printJobService,
+            List<String> extraBindHosts) {
         return Javalin.create(config -> {
-            config.jetty.host = BIND_HOST;
-            config.jetty.port = port;
+            bindHosts(extraBindHosts).forEach(host -> config.jetty.addConnector((server, httpConfiguration) -> {
+                ServerConnector connector = new ServerConnector(server, new HttpConnectionFactory(httpConfiguration));
+                connector.setHost(host);
+                connector.setPort(port);
+                return connector;
+            }));
             config.jetty.modifyWebSocketServletFactory(factory -> {
                 factory.setMaxBinaryMessageSize(MAX_PRINT_PAYLOAD_BYTES);
                 factory.setMaxFrameSize(MAX_PRINT_PAYLOAD_BYTES);
@@ -64,7 +89,10 @@ public final class ApiServer {
             // non-browser caller, allowed. Origin header present -> must match this server's own
             // origin (the only browser-facing page we serve, /test.html, satisfies that trivially);
             // any other site's origin is rejected before it can trigger a real print job or read the
-            // printer inventory.
+            // printer inventory. Unaffected by EXTRA_BIND_ADDRESSES_ENV above: a caller reaching an
+            // extra address is, by construction, a non-browser server-side client just like the
+            // loopback-only PluriBourse backend was already assumed to be — it never sends an
+            // Origin header either, so it's already covered by the same "no Origin -> trusted" rule.
             config.routes.before(ctx -> enforceSameOrigin(ctx, port));
             config.routes.wsBeforeUpgrade(ctx -> enforceSameOrigin(ctx, port));
             config.routes.get("/printers", ctx -> ctx.json(registry.discoverAll()));
@@ -101,6 +129,29 @@ public final class ApiServer {
                 ws.onError(PENDING_CONTROL::remove);
             });
         }).start();
+    }
+
+    /**
+     * Always includes {@link #BIND_HOST}, plus whatever extra addresses were supplied — deduplicated
+     * so a caller accidentally repeating {@code 127.0.0.1} in the extra list doesn't register two
+     * connectors on the exact same host:port (Jetty would fail to start with "address already in
+     * use").
+     */
+    private static List<String> bindHosts(List<String> extraBindHosts) {
+        LinkedHashSet<String> hosts = new LinkedHashSet<>();
+        hosts.add(BIND_HOST);
+        hosts.addAll(extraBindHosts);
+        return List.copyOf(hosts);
+    }
+
+    static List<String> parseExtraBindHosts(String rawEnvValue) {
+        if (rawEnvValue == null || rawEnvValue.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(rawEnvValue.split(","))
+                .map(String::trim)
+                .filter(host -> !host.isEmpty())
+                .toList();
     }
 
     private static void enforceSameOrigin(Context ctx, int port) {

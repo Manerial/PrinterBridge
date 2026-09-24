@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
+import org.eclipse.jetty.server.ServerConnector;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -207,6 +208,55 @@ class ApiServerTest {
 
     // Deliberately not tested here: a successful test-print against a real, discovered printer —
     // it would actually attempt to print (cf. PrintJobServiceTest). Validate manually instead.
+
+    @Test
+    void listensOnExtraBindHostsInAdditionToLoopback() throws IOException, InterruptedException {
+        // Real end-to-end check (not just parseExtraBindHosts below) that Javalin/Jetty actually
+        // opens a second connector — confirmed by hand against a real Docker bridge address on
+        // Linux (CLAUDE.md), but exercised here with a loopback alias so it runs unattended on any
+        // OS/CI runner: 127.0.0.0/8 is all loopback on Windows, Linux and macOS alike, no extra
+        // network setup needed.
+        Javalin multiHostApp = ApiServer.start(0, new PrinterRegistry(List.of(new FakeDiscovery(List.of(KNOWN_PRINTER)))),
+                new PrintJobService(id -> Optional.empty(), id -> Optional.empty()), List.of("127.0.0.2"));
+        try {
+            int extraPort = extraConnectorPort(multiHostApp, "127.0.0.2");
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.2:" + extraPort + "/printers"))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+        } finally {
+            multiHostApp.stop();
+        }
+    }
+
+    @Test
+    void parseExtraBindHostsReturnsEmptyForNullOrBlank() {
+        assertEquals(List.of(), ApiServer.parseExtraBindHosts(null));
+        assertEquals(List.of(), ApiServer.parseExtraBindHosts(""));
+        assertEquals(List.of(), ApiServer.parseExtraBindHosts("   "));
+    }
+
+    @Test
+    void parseExtraBindHostsSplitsTrimsAndDropsEmptyEntries() {
+        assertEquals(List.of("172.19.0.1", "10.0.0.5"),
+                ApiServer.parseExtraBindHosts(" 172.19.0.1 , ,10.0.0.5,"));
+    }
+
+    private static int extraConnectorPort(Javalin app, String host) {
+        return Arrays.stream(app.jettyServer().server().getConnectors())
+                .filter(ServerConnector.class::isInstance)
+                .map(ServerConnector.class::cast)
+                .filter(connector -> host.equals(connector.getHost()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No connector bound to " + host))
+                .getLocalPort();
+    }
 
     private String sendPrintRequest(int port, String printerId, PrintContentType contentType, int declaredSize,
             byte[] payload) throws Exception {
