@@ -11,8 +11,7 @@ permissions:
 
 jobs:
   linux:
-    # Cible principale (cf. CLAUDE.md § Positionnement) — x86_64 uniquement ici ;
-    # arm64 (Raspberry Pi) demanderait un runner arm64 dédié, pas encore mis en place.
+    # Cible principale (cf. CLAUDE.md § Positionnement) — x86_64.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +28,31 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: printerbridge-linux-deb
+          name: printerbridge-linux-amd64-deb
+          path: target/dist/*.deb
+
+  linux-arm64:
+    # Cible secondaire (Raspberry Pi/Raspbian, cf. CLAUDE.md § Positionnement). jpackage ne fait pas
+    # de cross-compilation : ce job doit tourner SUR un runner arm64, d'où ubuntu-24.04-arm (runner
+    # Linux arm64 hébergé par GitHub, gratuit sur dépôt public) plutôt que ubuntu-latest + émulation.
+    # packaging/jpackage-linux.sh est déjà indépendant de l'architecture, aucune modif nécessaire.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - run: mvn -B clean package
+
+      - run: ./packaging/jpackage-linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: printerbridge-linux-arm64-deb
           path: target/dist/*.deb
 
   windows:
@@ -85,7 +108,7 @@ jobs:
   # 3 installeurs publics, sans connexion, et donne une URL stable ("dernière version") pour un
   # script d'installation automatisé côté PluriBourse.
   release:
-    needs: [linux, windows, macos]
+    needs: [linux, linux-arm64, windows, macos]
     # Seulement sur un vrai tag de version — un déclenchement manuel (workflow_dispatch) sans tag
     # associé n'a rien de cohérent à quoi rattacher une Release ; les jobs ci-dessus produisent quand
     # même leurs artefacts de run dans ce cas, pour tester une build sans publier quoi que ce soit.
@@ -106,7 +129,8 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
-            dist/printerbridge-linux-deb/*.deb \
+            dist/printerbridge-linux-amd64-deb/*.deb \
+            dist/printerbridge-linux-arm64-deb/*.deb \
             dist/printerbridge-windows-msi/*.msi \
             dist/printerbridge-macos-pkg/*.pkg \
             --title "${{ github.ref_name }}" \
