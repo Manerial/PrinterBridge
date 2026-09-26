@@ -29,7 +29,7 @@ import org.printerbridge.printer.PrintContentType;
 import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterStatus;
 import org.printerbridge.printer.PrinterType;
-import org.printerbridge.service.PrinterDiscovery;
+import org.printerbridge.service.discovery.PrinterDiscovery;
 import org.printerbridge.service.PrinterRegistry;
 import org.printerbridge.service.PrintJobService;
 
@@ -44,13 +44,10 @@ class ApiServerTest {
 
     @BeforeEach
     void startServer() {
-        // Fake registry/print-job-service by default. The real ones go through OS/WMI discovery,
-        // measured at ~7.5s per call on real hardware (WindowsBluetoothPortInfo, not a code bug —
-        // the WMI enumeration itself is that slow here) — that used to make every test in this
-        // class pay that cost even for ones that only care about an unknown id or a malformed
-        // request, and made the WS tests below time out against their 5s wait. See CLAUDE.md
-        // (correctif audit) and the one "hardware"-tagged test at the bottom for the case that
-        // still needs the real thing.
+        // Fake registry/print-job-service by default: the real ones go through OS/WMI discovery,
+        // measured at ~7.5s per call on real hardware (see WindowsBluetoothPortInfo), which used to
+        // make every test here pay that cost and made the WS tests below time out. The one
+        // "hardware"-tagged test at the bottom still exercises the real thing.
         app = ApiServer.start(0, new PrinterRegistry(List.of(new FakeDiscovery(List.of(KNOWN_PRINTER)))),
                 new PrintJobService(id -> Optional.empty(), id -> Optional.empty()));
     }
@@ -63,8 +60,7 @@ class ApiServerTest {
     @Test
     void rejectsRequestsWithAMismatchedOrigin() throws IOException, InterruptedException {
         // Loopback binding alone doesn't stop another site open in the admin's browser from calling
-        // this API (see CLAUDE.md / enforceSameOrigin in ApiServer) — a request carrying a foreign
-        // Origin header must be rejected outright, even though it targets 127.0.0.1 like everyone else.
+        // this API (see enforceSameOrigin in ApiServer) — a foreign Origin header must be rejected.
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + app.port() + "/printers"))
@@ -130,11 +126,9 @@ class ApiServerTest {
         assertTrue(response.contains("Unknown printer id"));
     }
 
-    // Uses real discovery/print-job-service (not the fake-backed app above): the mismatch check
+    // Uses real discovery/print-job-service (not the fake-backed app above). The mismatch check
     // itself is already covered hardware-independently by PrintJobServiceTest.requireContentType*;
-    // this one is a genuine end-to-end sanity check against a real network printer, hence tagged
-    // and excluded from the default `mvn test` run like the rest of the hardware-dependent tests
-    // (pom.xml, test.excludedGroups).
+    // this one is a genuine end-to-end sanity check against a real network printer.
     @Test
     @Tag("hardware")
     void printRejectsMismatchedContentTypeForNetworkPrinter() throws Exception {
@@ -211,14 +205,10 @@ class ApiServerTest {
 
     @Test
     void listensOnExtraBindHostsInAdditionToLoopback() throws IOException, InterruptedException {
-        // Real end-to-end check (not just parseExtraBindHosts below) that Javalin/Jetty actually
-        // opens a second connector — confirmed by hand against a real Docker bridge address on
-        // Linux (CLAUDE.md), but exercised here with the IPv6 loopback so it runs unattended on any
-        // OS/CI runner. A second IPv4 loopback alias (e.g. 127.0.0.2) does NOT work for this: Linux
-        // and Windows treat the whole 127.0.0.0/8 range as loopback out of the box, but macOS only
-        // pre-configures 127.0.0.1 on lo0 — binding to another IPv4 loopback address there requires
-        // an explicit `ifconfig lo0 alias` first (confirmed by a real macOS CI failure: "Can't assign
-        // requested address"). ::1 is pre-configured everywhere without any extra setup.
+        // Real end-to-end check that Javalin/Jetty actually opens a second connector — uses the IPv6
+        // loopback so it runs unattended on any OS/CI runner. A second IPv4 loopback alias (e.g.
+        // 127.0.0.2) doesn't work everywhere: macOS only pre-configures 127.0.0.1 on lo0 (confirmed
+        // by a real CI failure there), unlike Linux/Windows. ::1 needs no setup on any OS.
         Javalin multiHostApp = ApiServer.start(0, new PrinterRegistry(List.of(new FakeDiscovery(List.of(KNOWN_PRINTER)))),
                 new PrintJobService(id -> Optional.empty(), id -> Optional.empty()), List.of("::1"));
         try {
@@ -274,9 +264,8 @@ class ApiServerTest {
         ws.sendText(controlJson, true).get(5, TimeUnit.SECONDS);
         ws.sendBinary(ByteBuffer.wrap(payload), true).get(5, TimeUnit.SECONDS);
 
-        // The fake-backed tests above resolve near-instantly, so this ceiling only ever matters for
-        // the "hardware"-tagged test, whose real discovery call is itself ~7.5s on real hardware
-        // (measured, see CLAUDE.md) — comfortable margin above that, not a fixed wait.
+        // The fake-backed tests above resolve near-instantly; this ceiling only matters for the
+        // "hardware"-tagged test, whose real discovery call is itself ~7.5s on real hardware.
         return firstMessage.get(20, TimeUnit.SECONDS);
     }
 

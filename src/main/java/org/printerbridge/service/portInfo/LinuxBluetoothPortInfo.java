@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.service.portInfo;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -11,6 +11,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.printerbridge.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +31,7 @@ import org.slf4j.LoggerFactory;
  * Not validated against a real paired Bluetooth thermal printer — no such hardware available yet
  * (cf. CLAUDE.md).
  */
-final class LinuxBluetoothPortInfo {
+public final class LinuxBluetoothPortInfo {
 
     private static final Logger LOG = LoggerFactory.getLogger(LinuxBluetoothPortInfo.class);
     private static final Pattern RFCOMM_PORT = Pattern.compile("(?i)^(/dev/)?rfcomm\\d+$");
@@ -48,11 +50,11 @@ final class LinuxBluetoothPortInfo {
     private LinuxBluetoothPortInfo() {
     }
 
-    static boolean isLinux() {
+    public static boolean isLinux() {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux");
     }
 
-    static boolean isLikelyRfcommDevice(String systemPortName) {
+    public static boolean isLikelyRfcommDevice(String systemPortName) {
         return systemPortName != null && RFCOMM_PORT.matcher(systemPortName).matches();
     }
 
@@ -63,7 +65,7 @@ final class LinuxBluetoothPortInfo {
      * timeout) yields an empty map rather than hiding a printer — callers must fall back to the
      * port name, same contract as {@link WindowsBluetoothPortInfo}.
      */
-    static Map<String, String> queryMacAddresses() {
+    public static Map<String, String> queryMacAddresses() {
         return queryInfo().macByPort();
     }
 
@@ -74,7 +76,7 @@ final class LinuxBluetoothPortInfo {
      * missing, no bindings, timeout) yields an empty map rather than hiding a printer — callers must
      * fall back to a generic port name, same contract as {@link WindowsBluetoothPortInfo}.
      */
-    static Map<String, String> queryFriendlyNames() {
+    public static Map<String, String> queryFriendlyNames() {
         return queryInfo().friendlyNameByPort();
     }
 
@@ -153,7 +155,7 @@ final class LinuxBluetoothPortInfo {
         return thread;
     }
 
-    static Map<String, String> parseRfcommBindings(List<String> lines) {
+    public static Map<String, String> parseRfcommBindings(List<String> lines) {
         Map<String, String> portToMac = new HashMap<>();
         for (String line : lines) {
             Matcher matcher = RFCOMM_BINDING.matcher(line.trim());
@@ -164,7 +166,7 @@ final class LinuxBluetoothPortInfo {
         return portToMac;
     }
 
-    static Map<String, String> parseBluetoothctlDevices(List<String> lines) {
+    public static Map<String, String> parseBluetoothctlDevices(List<String> lines) {
         Map<String, String> macToName = new HashMap<>();
         for (String line : lines) {
             Matcher matcher = BLUETOOTHCTL_DEVICE.matcher(line.trim());

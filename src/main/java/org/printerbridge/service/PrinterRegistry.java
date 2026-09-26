@@ -3,6 +3,7 @@ package org.printerbridge.service;
 import java.util.List;
 import java.util.Optional;
 import org.printerbridge.printer.Printer;
+import org.printerbridge.service.discovery.*;
 
 public final class PrinterRegistry {
 

@@ -10,7 +10,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * Bluetooth RFCOMM connection open — the protocol itself only allows a single active
  * connection per device (see CLAUDE.md, "Pourquoi ce projet existe").
  */
-final class PrinterLocks {
+public final class PrinterLocks {
 
     private static final ConcurrentHashMap<String, Lock> LOCKS = new ConcurrentHashMap<>();
 
@@ -26,7 +26,7 @@ final class PrinterLocks {
     private PrinterLocks() {
     }
 
-    static Lock forPrinter(String printerId) {
+    public static Lock forPrinter(String printerId) {
         return LOCKS.computeIfAbsent(printerId, id -> new ReentrantLock());
     }
 
@@ -38,7 +38,7 @@ final class PrinterLocks {
         STUCK.remove(printerId);
     }
 
-    static boolean isStuck(String printerId) {
+    public static boolean isStuck(String printerId) {
         return STUCK.contains(printerId);
     }
 }

@@ -18,10 +18,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.ServerConnector;
-import org.printerbridge.service.PrintJobException;
+import org.printerbridge.exception.PrintJobException;
 import org.printerbridge.service.PrintJobService;
 import org.printerbridge.service.PrinterRegistry;
-import org.printerbridge.service.UnknownPrinterException;
+import org.printerbridge.exception.UnknownPrinterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

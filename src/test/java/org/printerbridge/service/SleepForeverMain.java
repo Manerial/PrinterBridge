@@ -1,5 +1,7 @@
 package org.printerbridge.service;
 
+import org.printerbridge.service.portInfo.*;
+
 /**
  * Test-only helper process for {@link ExternalProcessTest}: launched via the same {@code java}
  * binary running the tests, so the timeout-enforcement path in {@link ExternalProcess} can be

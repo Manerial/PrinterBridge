@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.service.portInfo;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,12 +13,12 @@ import java.util.concurrent.TimeUnit;
  * while the timeout is enforced on the calling thread; timing out force-destroys the process,
  * which closes the pipe and unblocks the reader.
  */
-final class ExternalProcess {
+public final class ExternalProcess {
 
     private ExternalProcess() {
     }
 
-    static String run(long timeoutSeconds, String... command) throws IOException, InterruptedException {
+    public static String run(long timeoutSeconds, String... command) throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
         StringBuilder output = new StringBuilder();
         Thread reader = new Thread(() -> {

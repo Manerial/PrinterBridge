@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.service.discovery;
 
 import com.fazecast.jSerialComm.SerialPort;
 import java.util.Arrays;
@@ -11,6 +11,12 @@ import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterId;
 import org.printerbridge.printer.PrinterStatus;
 import org.printerbridge.printer.PrinterType;
+import org.printerbridge.service.*;
+import org.printerbridge.service.portInfo.WindowsBluetoothPortInfo;
+import org.printerbridge.service.portInfo.WindowsBluetoothPortInfo.*;
+import org.printerbridge.service.portInfo.LinuxBluetoothPortInfo;
+import org.printerbridge.service.portInfo.LinuxBluetoothPortInfo.*;
+import org.printerbridge.service.PrinterLocks;
 
 public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
 
@@ -35,7 +41,7 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
                         PrinterType.BLUETOOTH_THERMAL, testConnectivity(id, port)));
     }
 
-    static Optional<SerialPort> findPort(String id) {
+    public static Optional<SerialPort> findPort(String id) {
         return findPort(id, WindowsBluetoothPortInfo.query(), LinuxBluetoothPortInfo.queryMacAddresses());
     }
 
@@ -79,8 +85,8 @@ public final class BluetoothPrinterDiscovery implements PrinterDiscovery {
      * naming convention (e.g. rejects "COM7" outright on Linux/macOS), which made this untestable
      * with a fabricated port name on any OS other than the one a given test string happened to match.
      */
-    static String physicalKey(String systemPortName, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
-            Map<String, String> linuxMacs) {
+    public static String physicalKey(String systemPortName, Map<String, WindowsBluetoothPortInfo.PortInfo> portInfo,
+                                     Map<String, String> linuxMacs) {
         WindowsBluetoothPortInfo.PortInfo info = portInfo.get(systemPortName);
         if (info != null && info.mac() != null) {
             return normalizeMac(info.mac());

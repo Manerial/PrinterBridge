@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.service.portInfo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.printerbridge.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,7 +26,7 @@ import org.slf4j.LoggerFactory;
  * See {@link LinuxBluetoothPortInfo} for the Linux equivalent (different signal, fails closed
  * instead). No macOS equivalent exists yet.
  */
-final class WindowsBluetoothPortInfo {
+public final class WindowsBluetoothPortInfo {
 
     private static final Logger LOG = LoggerFactory.getLogger(WindowsBluetoothPortInfo.class);
     private static final Pattern MAC_BEFORE_SUFFIX = Pattern.compile("([0-9A-Fa-f]{12})_[^\\\\]*$");
@@ -49,13 +51,13 @@ final class WindowsBluetoothPortInfo {
             + "$ports = Get-CimInstance Win32_SerialPort | Select-Object DeviceID, PNPDeviceID; "
             + "[PSCustomObject]@{ Devices = $devices; Ports = $ports } | ConvertTo-Json -Depth 4";
 
-    record PortInfo(boolean realRemoteDevice, String friendlyName, String mac) {
+    public record PortInfo(boolean realRemoteDevice, String friendlyName, String mac) {
     }
 
     private WindowsBluetoothPortInfo() {
     }
 
-    static Map<String, PortInfo> query() {
+    public static Map<String, PortInfo> query() {
         if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
             return Map.of();
         }
@@ -80,7 +82,7 @@ final class WindowsBluetoothPortInfo {
         return queried;
     }
 
-    static Map<String, String> parseBluetoothDeviceNames(JsonNode devices) {
+    public static Map<String, String> parseBluetoothDeviceNames(JsonNode devices) {
         Map<String, String> macToName = new HashMap<>();
         for (JsonNode device : asArray(devices)) {
             String instanceId = device.path("InstanceId").asText("");
@@ -94,7 +96,7 @@ final class WindowsBluetoothPortInfo {
         return macToName;
     }
 
-    static Map<String, PortInfo> parsePortInfo(JsonNode ports, Map<String, String> macToFriendlyName) {
+    public static Map<String, PortInfo> parsePortInfo(JsonNode ports, Map<String, String> macToFriendlyName) {
         Map<String, PortInfo> result = new HashMap<>();
         for (JsonNode port : asArray(ports)) {
             String deviceId = port.path("DeviceID").asText("");

@@ -12,16 +12,15 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterType;
+import org.printerbridge.service.discovery.*;
+import org.printerbridge.service.portInfo.*;
 
 class BluetoothPrinterDiscoveryTest {
 
     private final BluetoothPrinterDiscovery discovery = new BluetoothPrinterDiscovery();
 
-    // Both tests below go through SerialPort.getCommPorts() + real WMI/rfcomm enrichment — on
-    // Windows that's a ~7.5s external PowerShell/WMI call (measured, not a code bug: see
-    // WindowsBluetoothPortInfo). Tagged "hardware" and excluded from the default `mvn test` run
-    // (pom.xml, test.excludedGroups) so the fast suite doesn't pay that cost; run explicitly with
-    // `mvn test -Dtest.excludedGroups=`.
+    // Both tests below go through SerialPort.getCommPorts() + real WMI/rfcomm enrichment — a
+    // ~7.5s external call on Windows (see WindowsBluetoothPortInfo), hence tagged "hardware".
 
     @Test
     @Tag("hardware")
@@ -41,14 +40,11 @@ class BluetoothPrinterDiscoveryTest {
         assertEquals(Optional.empty(), discovery.findById("unknown"));
     }
 
-    // physicalKey is what toPrinter()/findPort() actually hash into a printer id — exercised
-    // directly here with constructed maps, independently of any real Bluetooth hardware (see
-    // CLAUDE.md: none available). Requested behavior: prefer the MAC (never changes across a
-    // re-pair) over the port name (can be reassigned by the OS), falling back to the port name
-    // only when no MAC is known for this port. Takes a plain port name string rather than a real
-    // SerialPort on purpose — SerialPort.getCommPort(String) validates its argument against the
-    // current OS's naming convention (e.g. rejects "COM7" outright on Linux/macOS), which made an
-    // earlier version of these tests fail in CI on non-Windows runners.
+    // physicalKey prefers the MAC (never changes across a re-pair) over the port name (can be
+    // reassigned by the OS), falling back to the port name only when no MAC is known. Takes a plain
+    // port name string rather than a real SerialPort on purpose — SerialPort.getCommPort(String)
+    // validates against the current OS's naming convention, which broke these tests in CI on
+    // non-Windows runners when they used to construct a real SerialPort.
 
     @Test
     void physicalKeyPrefersTheWindowsMacOverThePortName() {

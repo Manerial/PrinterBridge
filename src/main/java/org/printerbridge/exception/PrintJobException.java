@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.exception;
 
 public class PrintJobException extends RuntimeException {
 

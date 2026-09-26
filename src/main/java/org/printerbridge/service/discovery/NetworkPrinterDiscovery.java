@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.service.discovery;
 
 import java.util.Arrays;
 import java.util.List;
@@ -28,7 +28,7 @@ public final class NetworkPrinterDiscovery implements PrinterDiscovery {
                 .findFirst();
     }
 
-    static Optional<PrintService> findService(String id) {
+    public static Optional<PrintService> findService(String id) {
         return Arrays.stream(PrintServiceLookup.lookupPrintServices(null, null))
                 .filter(service -> PrinterId.derive(service.getName()).equals(id))
                 .findFirst();

@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.service.discovery;
 
 import java.util.List;
 import java.util.Optional;

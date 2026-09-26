@@ -1,4 +1,4 @@
-package org.printerbridge.service;
+package org.printerbridge.exception;
 
 /**
  * Thrown when a printer id doesn't correspond to any currently discovered printer — distinct from

@@ -2,8 +2,6 @@ package org.printerbridge.service;
 
 import com.fazecast.jSerialComm.SerialPort;
 import java.awt.print.Printable;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Optional;
@@ -23,7 +21,13 @@ import javax.print.PrintService;
 import javax.print.SimpleDoc;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.printerbridge.exception.*;
 import org.printerbridge.printer.PrintContentType;
+import org.printerbridge.service.discovery.*;
+import org.printerbridge.service.portInfo.*;
+import org.printerbridge.service.transport.BluetoothPrintTransport;
+import org.printerbridge.service.transport.LinuxBluetoothPrintTransport;
+import org.printerbridge.service.transport.WindowsBluetoothPrintTransport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,34 +35,32 @@ public final class PrintJobService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PrintJobService.class);
 
-    // Placeholder pending the broader error/timeout policy decision (CLAUDE.md, still open) —
-    // this only bounds how long a request waits for the single Bluetooth connection to free up.
+    // How long a request waits for the single Bluetooth connection to free up (cf. CLAUDE.md).
     private static final long LOCK_WAIT_SECONDS = 10;
 
-    // Confirmed against real hardware: a dead/misidentified Bluetooth link (cf. CLAUDE.md,
-    // jSerialComm can't always tell a real device from a generic serial-port artifact) lets
-    // openPort() succeed but then blocks forever on the write, with no cross-platform native
-    // timeout available (jSerialComm's own write timeout is Windows-only). Bounded here instead
-    // by running the write on a separate thread and force-closing the port if it doesn't return
-    // in time — closing out from under a blocked native write reliably unblocks it.
+    // A dead/misidentified Bluetooth link can let open() succeed but then block forever on the
+    // write, with no cross-platform native timeout (jSerialComm's own is Windows-only). Bounded
+    // here by running the write on a separate thread and force-closing if it doesn't return in
+    // time — closing unblocks a stuck native write reliably.
     private static final long WRITE_TIMEOUT_SECONDS = 10;
 
-    // Confirmed against real hardware (Netum thermal printer, cf. CLAUDE.md): write() + flush()
-    // returning only means the bytes were handed to the OS's RFCOMM output buffer, not that they
-    // physically went out over the air yet — Bluetooth SPP throughput is far slower than a local
-    // buffer copy. printViaBluetooth calls port.closePort() immediately afterwards, and closing the
-    // port while data is still queued for transmission can tear down the connection before it's
-    // actually sent, silently discarding it (an OS-level shell write via plain file redirection
-    // doesn't have this problem, which is what pointed at closePort() rather than write() itself as
-    // the culprit). This delay gives the physical transmission time to drain before the port closes.
+    // write()+flush() returning only means the bytes reached the OS's output buffer, not that
+    // they were physically transmitted yet — Bluetooth SPP is much slower than a local buffer
+    // copy, and closing the channel while data is still queued can cut the connection before it's
+    // sent (confirmed on real hardware, cf. CLAUDE.md). This delay lets the transmission drain
+    // before closing.
     private static final long POST_WRITE_SETTLE_MILLIS = 500;
 
-    // Shared rather than one-per-call: jSerialComm's write() blocks in native (JNI) code, which
-    // pins whatever thread runs it — including a virtual thread's carrier, with no benefit over a
-    // platform thread — so a stuck write leaks a thread either way. A shared cached pool at least
-    // avoids paying OS thread create/teardown cost on every single (normally fast) write.
+    // Shared rather than one-per-call: a stuck native write pins its thread regardless (even a
+    // virtual thread's carrier gains nothing), so a cached pool at least avoids paying thread
+    // create/teardown cost on every normal (fast) write.
     private static final ExecutorService WRITE_EXECUTOR =
             Executors.newCachedThreadPool(PrintJobService::newDaemonThread);
+
+    // Resolved once: the OS doesn't change at runtime. Windows keeps the validated jSerialComm
+    // implementation; Linux gets its own, iterated on independently (cf. CLAUDE.md).
+    private static final BluetoothPrintTransport BLUETOOTH_TRANSPORT =
+            LinuxBluetoothPortInfo.isLinux() ? new LinuxBluetoothPrintTransport() : new WindowsBluetoothPrintTransport();
 
     private final Function<String, Optional<SerialPort>> bluetoothPortLookup;
     private final Function<String, Optional<PrintService>> networkServiceLookup;
@@ -72,13 +74,10 @@ public final class PrintJobService {
     }
 
     /**
-     * Injectable constructor — lets callers (tests, mainly) resolve printer ids without touching
-     * real hardware or the OS. Real Windows/Linux Bluetooth port lookup goes through WMI/`rfcomm`,
-     * an external-process call that's consistently ~7s on real hardware (measured — not a code
-     * bug, the WMI enumeration itself is that slow on at least one dev machine) — every automated
-     * test that used to resolve a real id, including "unknown id" error-path tests that don't care
-     * about discovery at all, paid that cost. This constructor is the fix: it lets those tests
-     * supply id -&gt; Optional.empty() (or a specific fake id) directly, with no discovery latency.
+     * Injectable constructor for tests: resolves printer ids without touching real hardware. Real
+     * Bluetooth port lookup goes through WMI/{@code rfcomm}, an external-process call measured at
+     * ~7s on real hardware — this lets tests (including "unknown id" error-path tests that don't
+     * care about discovery) supply id -&gt; Optional.empty() directly, skipping that cost entirely.
      */
     public PrintJobService(Function<String, Optional<SerialPort>> bluetoothPortLookup,
             Function<String, Optional<PrintService>> networkServiceLookup) {
@@ -103,10 +102,9 @@ public final class PrintJobService {
     }
 
     /**
-     * Actually attempts to print a small, generated test payload appropriate to the printer's
-     * transport, so a caller (the PluriBourse backend) can learn whether a printer really works
-     * end to end — not just that its port/service can be opened, which we've seen isn't enough
-     * (cf. CLAUDE.md): a dead Bluetooth link can still report as reachable.
+     * Actually attempts to print a small generated payload, so a caller can learn whether a
+     * printer really works end to end — not just that its port/service can be opened (a dead
+     * Bluetooth link can still report as reachable, cf. CLAUDE.md).
      */
     public void testPrint(String printerId) {
         Optional<SerialPort> port = bluetoothPortLookup.apply(printerId);
@@ -147,40 +145,31 @@ public final class PrintJobService {
             throw new PrintJobException("Printer " + printerId + " is busy printing another job, try again later");
         }
 
-        // Only released synchronously in the normal/failed-fast cases. On a write timeout, the
-        // abandoned write is still running on WRITE_EXECUTOR (see writeWithTimeout) and may still be
-        // touching the port when this method returns — releasing the lock here would let a second
-        // job for the same printer id race it for the RFCOMM connection, exactly what PrinterLocks
-        // exists to prevent. In that case the lock is instead released once the abandoned write
-        // actually finishes (see the StuckWriteException handling below).
+        // Only released synchronously in the normal/failed-fast cases — on a write timeout, the
+        // abandoned write is still running on WRITE_EXECUTOR and may still be touching the port, so
+        // unlocking here would let a second job race it for the same RFCOMM connection. The lock is
+        // instead released once that abandoned write actually finishes (see StuckWriteException
+        // handling below).
         CompletableFuture<Void> abandonedWrite = null;
         try {
+            BluetoothPrintTransport.Channel channel;
             try {
-                // Confirmed against real hardware (Netum thermal printer, cf. CLAUDE.md): on
-                // Linux, going through jSerialComm's own open()/write()/close() never actually
-                // gets data to this printer, while a plain byte-for-byte write to the /dev/rfcommN
-                // device node (the same thing a shell `> /dev/rfcommN` redirection does) works
-                // reliably. jSerialComm applies serial-port-specific configuration (baud rate,
-                // control lines) on open that a Bluetooth RFCOMM tty doesn't need and that seems to
-                // interfere with this device — bypassed entirely on Linux rather than guessed at
-                // and worked around. Windows is untouched: it's already validated end to end with
-                // jSerialComm (cf. CLAUDE.md) and Windows has no equivalent plain-file device path
-                // to fall back to.
-                if (LinuxBluetoothPortInfo.isLinux()) {
-                    LOG.info("Printing {} bytes to {} via raw /dev/{} write", payload.length, printerId,
-                            port.getSystemPortName());
-                    writeRawLinux(port, payload);
-                } else {
-                    LOG.info("Printing {} bytes to {} via jSerialComm ({})", payload.length, printerId,
-                            port.getSystemPortName());
-                    writeViaJSerialComm(port, payload);
-                }
+                channel = BLUETOOTH_TRANSPORT.open(port);
+            } catch (IOException e) {
+                throw new PrintJobException(
+                        "Could not open Bluetooth port " + port.getSystemPortName() + ": " + e.getMessage());
+            }
+            try {
+                LOG.info("Printing {} bytes to {} ({})", payload.length, printerId, port.getSystemPortName());
+                writeWithTimeout(() -> channel.write(payload), channel::close, port.getSystemPortName());
                 LOG.info("Write to {} completed without error", printerId);
             } catch (StuckWriteException e) {
                 abandonedWrite = e.pendingWrite;
                 PrinterLocks.markStuck(printerId);
                 LOG.warn("Write to {} got stuck: {}", printerId, e.getMessage());
                 throw new PrintJobException(e.getMessage());
+            } finally {
+                channel.close();
             }
         } finally {
             if (abandonedWrite == null) {
@@ -207,47 +196,6 @@ public final class PrintJobService {
         }
     }
 
-    private static void writeViaJSerialComm(SerialPort port, byte[] payload) {
-        if (!port.openPort()) {
-            throw new PrintJobException("Could not open Bluetooth port " + port.getSystemPortName());
-        }
-        try {
-            writeWithTimeout(() -> {
-                port.getOutputStream().write(payload);
-                port.getOutputStream().flush();
-            }, port::closePort, port.getSystemPortName());
-        } finally {
-            port.closePort();
-        }
-    }
-
-    private static void writeRawLinux(SerialPort port, byte[] payload) {
-        File devicePath = new File("/dev", port.getSystemPortName());
-        FileOutputStream out;
-        try {
-            out = new FileOutputStream(devicePath);
-        } catch (IOException e) {
-            throw new PrintJobException("Could not open Bluetooth port " + devicePath + ": " + e.getMessage());
-        }
-        try {
-            writeWithTimeout(() -> {
-                out.write(payload);
-                out.flush();
-            }, () -> closeQuietly(out), devicePath.toString());
-        } finally {
-            closeQuietly(out);
-        }
-    }
-
-    private static void closeQuietly(FileOutputStream out) {
-        try {
-            out.close();
-        } catch (IOException ignored) {
-            // Best effort: the write already failed or timed out by this point, closing is just
-            // releasing the RFCOMM connection, not something the caller can act on further.
-        }
-    }
-
     @FunctionalInterface
     private interface IoAction {
         void run() throws IOException;
@@ -266,10 +214,9 @@ public final class PrintJobService {
             write.get(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             Thread.sleep(POST_WRITE_SETTLE_MILLIS);
         } catch (TimeoutException e) {
-            // Force-closing out from under the stuck write is what actually unblocks it; the
-            // caller's own close-in-a-finally will then be a harmless no-op. The write task itself
-            // is left running on WRITE_EXECUTOR — it isn't cancelled, since interrupting a thread
-            // blocked in native/blocking I/O wouldn't do anything anyway.
+            // Force-closing is what unblocks the stuck write; the caller's own close-in-a-finally
+            // is then a harmless no-op. The write task is left running on WRITE_EXECUTOR rather than
+            // cancelled, since interrupting a thread blocked in native/blocking I/O does nothing.
             forceClose.run();
             throw new StuckWriteException(
                     "Timed out writing to Bluetooth port " + portDescription + " (dead or wrong link)", write);
@@ -299,12 +246,10 @@ public final class PrintJobService {
         } catch (PrintException e) {
             throw new PrintJobException("Failed to submit print job: " + e.getMessage());
         } catch (RuntimeException e) {
-            // PDFBox rendering (PdfPrintable, invoked synchronously by job.print()) can fail in ways
-            // that aren't IOException/PrintException for a malformed-but-openable PDF; without this,
-            // the exception would escape all the way to the WS handler and leave the caller hanging
-            // with no PrintResult at all. Logged at ERROR with the full stack trace (and attached as
-            // cause) so an unrelated programming error isn't silently mislabeled as a PDF problem —
-            // the client-facing message stays generic, but the real cause is still diagnosable here.
+            // PDFBox rendering can fail in ways that aren't IOException/PrintException for a
+            // malformed-but-openable PDF; without this, the exception would escape to the WS handler
+            // with no PrintResult at all. Logged at ERROR (with cause) so an unrelated bug isn't
+            // silently mislabeled as a PDF problem, even though the client-facing message stays generic.
             LOG.error("Unexpected failure while rendering/printing a PDF job", e);
             throw new PrintJobException("Failed to render or print PDF: " + e.getMessage(), e);
         }

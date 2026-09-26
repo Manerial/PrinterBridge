@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.printerbridge.printer.Printer;
 import org.printerbridge.printer.PrinterType;
+import org.printerbridge.service.discovery.*;
 
 class NetworkPrinterDiscoveryTest {
 

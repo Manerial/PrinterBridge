@@ -24,13 +24,9 @@ final class TestPrintPayloads {
 
     private static final String TEST_TEXT = "PrinterBridge test print";
 
-    // Le nombre de sauts de ligne finaux n'est pas cosmétique : sur une imprimante thermique, le
-    // texte peut être réellement imprimé sur le rouleau sans que le papier avance assez pour
-    // dépasser la fente/le massicot — donnant l'impression que rien ne s'est passé alors que
-    // plusieurs tests successifs s'accumulent en fait sur le même rouleau, invisibles jusqu'à ce
-    // qu'une avance suffisante (ou cumulée) les pousse enfin dehors. Vérifié empiriquement sur un
-    // modèle Netum (cf. CLAUDE.md) : 0 saut de ligne final ne suffit pas, 3 suffisent déjà — 4 ici
-    // pour une petite marge sans gâcher de papier à chaque test.
+    // Not cosmetic: on a thermal printer, text can print onto the roll without advancing far
+    // enough to clear the tear bar, making a test look like nothing happened. Confirmed on a
+    // Netum model (cf. CLAUDE.md): 0 trailing lines isn't enough, 3 is — 4 here for a small margin.
     private static final int TRAILING_FEED_LINES = 4;
 
     static byte[] escPos(String printerId) {
