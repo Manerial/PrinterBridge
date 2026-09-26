@@ -112,6 +112,7 @@ public final class ApiServer {
                     // attempt itself failed (busy, dead link, PDF rendering, ...).
                     throw new NotFoundResponse(e.getMessage());
                 } catch (PrintJobException e) {
+                    LOG.warn("test-print failed: {}", e.getMessage());
                     ctx.json(PrintResult.error(e.getMessage()));
                 } catch (RuntimeException e) {
                     // Mirrors the WS payload handler below: a dead/misidentified Bluetooth link
@@ -197,6 +198,7 @@ public final class ApiServer {
             printJobService.print(ctx.pathParam("id"), control.contentType(), payload);
             sendResult(ctx, PrintResult.ok());
         } catch (PrintJobException e) {
+            LOG.warn("Print job failed: {}", e.getMessage());
             sendResult(ctx, PrintResult.error(e.getMessage()));
         } catch (RuntimeException e) {
             // A dead/misidentified Bluetooth link (jSerialComm, e.g. SerialPortInvalidPortException)

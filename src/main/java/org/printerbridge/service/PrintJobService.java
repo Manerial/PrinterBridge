@@ -167,13 +167,19 @@ public final class PrintJobService {
                 // jSerialComm (cf. CLAUDE.md) and Windows has no equivalent plain-file device path
                 // to fall back to.
                 if (LinuxBluetoothPortInfo.isLinux()) {
+                    LOG.info("Printing {} bytes to {} via raw /dev/{} write", payload.length, printerId,
+                            port.getSystemPortName());
                     writeRawLinux(port, payload);
                 } else {
+                    LOG.info("Printing {} bytes to {} via jSerialComm ({})", payload.length, printerId,
+                            port.getSystemPortName());
                     writeViaJSerialComm(port, payload);
                 }
+                LOG.info("Write to {} completed without error", printerId);
             } catch (StuckWriteException e) {
                 abandonedWrite = e.pendingWrite;
                 PrinterLocks.markStuck(printerId);
+                LOG.warn("Write to {} got stuck: {}", printerId, e.getMessage());
                 throw new PrintJobException(e.getMessage());
             }
         } finally {
