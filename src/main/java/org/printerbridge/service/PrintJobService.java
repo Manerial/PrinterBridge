@@ -2,6 +2,8 @@ package org.printerbridge.service;
 
 import com.fazecast.jSerialComm.SerialPort;
 import java.awt.print.Printable;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Optional;
@@ -153,17 +155,26 @@ public final class PrintJobService {
         // actually finishes (see the StuckWriteException handling below).
         CompletableFuture<Void> abandonedWrite = null;
         try {
-            if (!port.openPort()) {
-                throw new PrintJobException("Could not open Bluetooth port " + port.getSystemPortName());
-            }
             try {
-                writeWithTimeout(port, payload);
+                // Confirmed against real hardware (Netum thermal printer, cf. CLAUDE.md): on
+                // Linux, going through jSerialComm's own open()/write()/close() never actually
+                // gets data to this printer, while a plain byte-for-byte write to the /dev/rfcommN
+                // device node (the same thing a shell `> /dev/rfcommN` redirection does) works
+                // reliably. jSerialComm applies serial-port-specific configuration (baud rate,
+                // control lines) on open that a Bluetooth RFCOMM tty doesn't need and that seems to
+                // interfere with this device — bypassed entirely on Linux rather than guessed at
+                // and worked around. Windows is untouched: it's already validated end to end with
+                // jSerialComm (cf. CLAUDE.md) and Windows has no equivalent plain-file device path
+                // to fall back to.
+                if (LinuxBluetoothPortInfo.isLinux()) {
+                    writeRawLinux(port, payload);
+                } else {
+                    writeViaJSerialComm(port, payload);
+                }
             } catch (StuckWriteException e) {
                 abandonedWrite = e.pendingWrite;
                 PrinterLocks.markStuck(printerId);
                 throw new PrintJobException(e.getMessage());
-            } finally {
-                port.closePort();
             }
         } finally {
             if (abandonedWrite == null) {
@@ -190,11 +201,56 @@ public final class PrintJobService {
         }
     }
 
-    private static void writeWithTimeout(SerialPort port, byte[] payload) {
-        CompletableFuture<Void> write = CompletableFuture.runAsync(() -> {
-            try {
+    private static void writeViaJSerialComm(SerialPort port, byte[] payload) {
+        if (!port.openPort()) {
+            throw new PrintJobException("Could not open Bluetooth port " + port.getSystemPortName());
+        }
+        try {
+            writeWithTimeout(() -> {
                 port.getOutputStream().write(payload);
                 port.getOutputStream().flush();
+            }, port::closePort, port.getSystemPortName());
+        } finally {
+            port.closePort();
+        }
+    }
+
+    private static void writeRawLinux(SerialPort port, byte[] payload) {
+        File devicePath = new File("/dev", port.getSystemPortName());
+        FileOutputStream out;
+        try {
+            out = new FileOutputStream(devicePath);
+        } catch (IOException e) {
+            throw new PrintJobException("Could not open Bluetooth port " + devicePath + ": " + e.getMessage());
+        }
+        try {
+            writeWithTimeout(() -> {
+                out.write(payload);
+                out.flush();
+            }, () -> closeQuietly(out), devicePath.toString());
+        } finally {
+            closeQuietly(out);
+        }
+    }
+
+    private static void closeQuietly(FileOutputStream out) {
+        try {
+            out.close();
+        } catch (IOException ignored) {
+            // Best effort: the write already failed or timed out by this point, closing is just
+            // releasing the RFCOMM connection, not something the caller can act on further.
+        }
+    }
+
+    @FunctionalInterface
+    private interface IoAction {
+        void run() throws IOException;
+    }
+
+    private static void writeWithTimeout(IoAction writeAction, Runnable forceClose, String portDescription) {
+        CompletableFuture<Void> write = CompletableFuture.runAsync(() -> {
+            try {
+                writeAction.run();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -204,19 +260,18 @@ public final class PrintJobService {
             write.get(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             Thread.sleep(POST_WRITE_SETTLE_MILLIS);
         } catch (TimeoutException e) {
-            // Force-closing out from under the stuck native write is what actually unblocks it;
-            // the caller's own `finally { port.closePort(); }` will then be a harmless no-op.
-            // The write task itself is left running on WRITE_EXECUTOR — it isn't cancelled,
-            // since interrupting a thread pinned in native code wouldn't do anything anyway.
-            port.closePort();
+            // Force-closing out from under the stuck write is what actually unblocks it; the
+            // caller's own close-in-a-finally will then be a harmless no-op. The write task itself
+            // is left running on WRITE_EXECUTOR — it isn't cancelled, since interrupting a thread
+            // blocked in native/blocking I/O wouldn't do anything anyway.
+            forceClose.run();
             throw new StuckWriteException(
-                    "Timed out writing to Bluetooth port " + port.getSystemPortName() + " (dead or wrong link)",
-                    write);
+                    "Timed out writing to Bluetooth port " + portDescription + " (dead or wrong link)", write);
         } catch (ExecutionException e) {
             throw new PrintJobException("Failed to write to Bluetooth port: " + e.getCause().getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new PrintJobException("Interrupted while writing to Bluetooth port " + port.getSystemPortName());
+            throw new PrintJobException("Interrupted while writing to Bluetooth port " + portDescription);
         }
     }
 
