@@ -41,6 +41,16 @@ public final class PrintJobService {
     // in time — closing out from under a blocked native write reliably unblocks it.
     private static final long WRITE_TIMEOUT_SECONDS = 10;
 
+    // Confirmed against real hardware (Netum thermal printer, cf. CLAUDE.md): write() + flush()
+    // returning only means the bytes were handed to the OS's RFCOMM output buffer, not that they
+    // physically went out over the air yet — Bluetooth SPP throughput is far slower than a local
+    // buffer copy. printViaBluetooth calls port.closePort() immediately afterwards, and closing the
+    // port while data is still queued for transmission can tear down the connection before it's
+    // actually sent, silently discarding it (an OS-level shell write via plain file redirection
+    // doesn't have this problem, which is what pointed at closePort() rather than write() itself as
+    // the culprit). This delay gives the physical transmission time to drain before the port closes.
+    private static final long POST_WRITE_SETTLE_MILLIS = 500;
+
     // Shared rather than one-per-call: jSerialComm's write() blocks in native (JNI) code, which
     // pins whatever thread runs it — including a virtual thread's carrier, with no benefit over a
     // platform thread — so a stuck write leaks a thread either way. A shared cached pool at least
@@ -192,6 +202,7 @@ public final class PrintJobService {
 
         try {
             write.get(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Thread.sleep(POST_WRITE_SETTLE_MILLIS);
         } catch (TimeoutException e) {
             // Force-closing out from under the stuck native write is what actually unblocks it;
             // the caller's own `finally { port.closePort(); }` will then be a harmless no-op.
