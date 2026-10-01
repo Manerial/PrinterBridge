@@ -244,7 +244,12 @@ public final class PrintJobService {
         } catch (IOException e) {
             throw new PrintJobException("Failed to read PDF payload: " + e.getMessage());
         } catch (PrintException e) {
-            throw new PrintJobException("Failed to submit print job: " + e.getMessage());
+            // PrinterIOException (a PrintException subclass) carries no message of its own -- the
+            // real cause is only visible in its own cause/stack trace, which getMessage() alone
+            // discards (confirmed in practice: a client-facing "Failed to submit print job:
+            // java.awt.print.PrinterIOException" with no further detail, cf. CLAUDE.md).
+            LOG.error("Failed to submit a print job", e);
+            throw new PrintJobException("Failed to submit print job: " + e.getMessage(), e);
         } catch (RuntimeException e) {
             // PDFBox rendering can fail in ways that aren't IOException/PrintException for a
             // malformed-but-openable PDF; without this, the exception would escape to the WS handler
